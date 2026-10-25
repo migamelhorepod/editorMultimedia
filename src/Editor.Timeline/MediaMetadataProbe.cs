@@ -74,10 +74,11 @@ public static class MediaMetadataProbe
         var foundFmt = false;
         var foundData = false;
 
+        Span<byte> chunk = stackalloc byte[8];
+        Span<byte> fmt = stackalloc byte[16];
         for (var i = 0; i < MaxWaveChunks && file.Position + 8 <= riffEnd &&
             file.Position < MaxWaveHeaderScan; i++)
         {
-            Span<byte> chunk = stackalloc byte[8];
             if (!ReadExactly(file, chunk)) return new MediaMetadata();
             var size = BinaryPrimitives.ReadUInt32LittleEndian(chunk[4..8]);
             var end = file.Position + size;
@@ -86,7 +87,6 @@ public static class MediaMetadataProbe
             if (chunk[..4].SequenceEqual("fmt "u8) && !foundFmt)
             {
                 if (size < 16) return new MediaMetadata();
-                Span<byte> fmt = stackalloc byte[16];
                 if (!ReadExactly(file, fmt)) return new MediaMetadata();
                 var format = BinaryPrimitives.ReadUInt16LittleEndian(fmt[..2]);
                 var channels = BinaryPrimitives.ReadUInt16LittleEndian(fmt[2..4]);
