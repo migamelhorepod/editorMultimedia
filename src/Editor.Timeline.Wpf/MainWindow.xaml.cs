@@ -1083,9 +1083,16 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        // While typing in the catalog search/filter, keyboard shortcuts for
-        // timeline editing must not consume text, arrows, Delete or Ctrl+Z.
-        if (Keyboard.FocusedElement is TextBox or ComboBox) return;
+        // Text inputs own typing, arrows, Delete and local Ctrl+Z.
+        // The app-level open/new/import/save shortcuts remain accessible.
+        if (Keyboard.FocusedElement is TextBox or ComboBox)
+        {
+            var globalCtrl = Keyboard.Modifiers == ModifierKeys.Control &&
+                (e.Key is Key.S or Key.O or Key.N or Key.I);
+            var globalSaveAs = Keyboard.Modifiers ==
+                (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.S;
+            if (!globalCtrl && !globalSaveAs) return;
+        }
 
         if (e.Key == Key.Escape && (draggingMarkerId is not null || scrubbingRuler))
         {
