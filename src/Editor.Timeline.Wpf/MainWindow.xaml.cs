@@ -21,12 +21,22 @@ public partial class MainWindow : Window
     private const double TrackHeight = 47;
     private TimelineSession session;
     private Guid projectId;
-    private string projectName = "Demonstração";
+    private string projectName = "Projeto sem título";
     private string? projectPath;
     private TimelineState savedState;
     private List<MediaAsset> mediaAssets = new();
     private IReadOnlyList<MediaAsset> savedMedia = Array.Empty<MediaAsset>();
     private readonly Dictionary<Guid, bool> availableMedia = new();
+    private Guid? catalogSelectionId;
+
+    // A project catalog entry may have zero, one or many timeline occurrences.
+    private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
+    {
+        public string Name => Asset.DisplayName;
+        public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
+            (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
+            $" · {Asset.SizeBytes / 1024.0:0.#} KB";
+    }
     private bool hasUnsavedChanges;
     private Guid? selectedId;
     private Guid? draggingId;
@@ -70,7 +80,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        session = new TimelineSession(CreateDemo());
+        session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
         savedState = session.Current;
         projectId = Guid.NewGuid();
         InitializeClipActionsToolbar();
@@ -160,6 +170,7 @@ public partial class MainWindow : Window
         projectName = project.Name;
         projectPath = path;
         savedState = session.Current;
+        catalogSelectionId = null;
         mediaAssets = session.Media.ToList();
         savedMedia = mediaAssets.ToArray();
         RefreshMediaPresence();
@@ -186,8 +197,13 @@ public partial class MainWindow : Window
     private void NewProject_Click(object sender, RoutedEventArgs e)
     {
         if (!ConfirmBeforeReplacingProject()) return;
-        // Until real-media import exists, a new demo is more useful than a blank,
-        // non-editable timeline. The menu labels this choice explicitly.
+        ResetLoadedProject(new EditorProject(Guid.NewGuid(), "Projeto sem título",
+            new TimelineState(0, Array.Empty<Clip>())), null);
+    }
+
+    private void NewDemo_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmBeforeReplacingProject()) return;
         ResetLoadedProject(new EditorProject(Guid.NewGuid(), "Demonstração", CreateDemo()), null);
     }
 
@@ -265,6 +281,7 @@ public partial class MainWindow : Window
                 mediaAssets = session.Media.ToList();
                 availableMedia[asset.Id] = true;
                 selectedId = proposed.Id;
+                catalogSelectionId = asset.Id;
                 added++;
             }
             catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
@@ -287,13 +304,159 @@ public partial class MainWindow : Window
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
 
+
+    private MediaAsset? CatalogSelection() =>
+        (MediaList?.SelectedItem as MediaListItem)?.Asset;
+
+    private void RefreshCatalogPanel()
+    {
+        if (MediaList is null || MediaSearchBox is null || MediaKindFilter is null ||
+            MediaSummary is null) return;
+        var requestedId = (MediaList.SelectedItem as MediaListItem)?.Asset.Id ?? catalogSelectionId;
+        var filter = MediaSearchBox.Text.Trim();
+        var category = MediaKindFilter.SelectedIndex;
+        var rows = mediaAssets
+            .Where(m => (filter.Length == 0 ||
+                m.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                m.SourcePath.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+            .Where(m => category switch
+            {
+                1 => m.Kind == MediaKind.Video,
+                2 => m.Kind == MediaKind.Audio,
+                3 => m.Kind == MediaKind.Image,
+                4 => !availableMedia.TryGetValue(m.Id, out var found) || !found,
+                _ => true
+            })
+            .OrderBy(m => m.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(m => m.Id)
+            .Select(m => new MediaListItem(
+                m,
+                session.Current.Clips.Count(c => c.MediaId == m.Id),
+                !availableMedia.TryGetValue(m.Id, out var found) || !found))
+            .ToArray();
+        MediaList.ItemsSource = rows;
+        var previous = rows.FirstOrDefault(row => row.Asset.Id == requestedId);
+        MediaList.SelectedItem = previous;
+        MediaSummary.Text = $"{rows.Length} de {mediaAssets.Count} mídia(s) · " +
+            $"{mediaAssets.Count(m => !availableMedia.TryGetValue(m.Id, out var available) || !available)} indisponível(is)";
+        UpdateCatalogActions();
+    }
+
+    private void UpdateCatalogActions()
+    {
+        if (InsertMediaButton is null || LocateMediaButton is null ||
+            RelinkMediaButton is null || RemoveMediaButton is null) return;
+        var item = MediaList?.SelectedItem as MediaListItem;
+        var hasSelected = item is not null;
+        var uses = item?.Usages ?? 0;
+        InsertMediaButton.IsEnabled = hasSelected && !item!.Missing;
+        LocateMediaButton.IsEnabled = uses > 0;
+        RelinkMediaButton.IsEnabled = hasSelected;
+        RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
+    }
+
+    private void MediaSearch_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (session is not null) RefreshCatalogPanel();
+    }
+
+    private void MediaFilter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (session is not null) RefreshCatalogPanel();
+    }
+
+    private void MediaSelection_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (MediaList?.SelectedItem is MediaListItem item)
+            catalogSelectionId = item.Asset.Id;
+        UpdateCatalogActions();
+    }
+
+    private void MediaList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        InsertFromCatalog_Click(sender, new RoutedEventArgs());
+    }
+
+    private void InsertFromCatalog_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is null) return;
+        if (!MediaReferences.IsAvailable(asset))
+        {
+            availableMedia[asset.Id] = false;
+            Draw();
+            MessageBox.Show(this,
+                "Mídia indisponível. Relocalize a referência antes de inseri-la.",
+                "Mídia indisponível", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            var planned = MediaReferences.PlanClip(session.Current, asset,
+                MediaTime.FromSeconds((decimal)playheadSeconds), Guid.NewGuid());
+            session.Execute(state => TimelineEngine.Insert(state, state.Version, planned));
+            selectedId = planned.Id;
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is TimelineException or MediaReferenceException or OverflowException)
+        {
+            MessageBox.Show(this, ex is TimelineException { Code: "NO_FREE_TRACK" }
+                ? "Não é possível criar mais trilhas\n\nConsidere realocar a mídia em uma trilha já existente"
+                : ex.Message,
+                "Não foi possível inserir a mídia", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void LocateCatalogClip_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is null) return;
+        var clip = session.Current.Clips.Where(c => c.MediaId == asset.Id)
+            .OrderBy(c => c.Start.Ticks).ThenBy(c => c.Track).FirstOrDefault();
+        if (clip is null) return;
+        selectedId = clip.Id;
+        Draw();
+        Viewport.ScrollToHorizontalOffset(Math.Max(0, X(clip.Start) - HeaderWidth - 40));
+        Viewport.ScrollToVerticalOffset(Math.Max(0, Y(clip.Track) - RulerHeight));
+    }
+
+    private void RemoveUnusedMedia_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is null) return;
+        try
+        {
+            session.RemoveUnusedMedia(asset.Id);
+            mediaAssets = session.Media.ToList();
+            availableMedia.Remove(asset.Id);
+            catalogSelectionId = null;
+            UpdateDirty();
+            Draw();
+        }
+        catch (MediaReferenceException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Operação não permitida",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void RelinkCatalogMedia_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is not null) RelinkAsset(asset);
+    }
+
     private void RelinkSelectedMedia_Click(object sender, RoutedEventArgs e)
     {
         var clip = Selected();
         if (clip is null) return;
         var media = mediaAssets.FirstOrDefault(m => m.Id == clip.MediaId);
-        if (media is null) return;
+        if (media is not null) RelinkAsset(media);
+    }
 
+    private void RelinkAsset(MediaAsset media)
+    {
         var filter = media.Kind switch
         {
             MediaKind.Video => "Arquivos de vídeo|*.mp4;*.mov;*.mkv;*.avi;*.webm",
@@ -356,6 +519,7 @@ public partial class MainWindow : Window
     private void Draw()
     {
         if (Surface is null || session is null) return;
+        RefreshCatalogPanel();
         // Atualizar disponibilidade em conjunto com a seleção, inclusive após Undo/Redo.
         var selected = Selected();
         if (duplicateToolbarButton is not null)
