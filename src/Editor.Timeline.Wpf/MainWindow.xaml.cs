@@ -35,6 +35,12 @@ public partial class MainWindow : Window
         public string Name => Asset.DisplayName;
         public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
             (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
+            (Asset.DurationTicks is long ticks
+                ? $" · WAV {TimeSpan.FromTicks(ticks).TotalSeconds:0.###}s (duração real)"
+                : "") +
+            (Asset.PixelWidth is int width && Asset.PixelHeight is int height
+                ? $" · PNG {width}×{height}px"
+                : "") +
             $" · {Asset.SizeBytes / 1024.0:0.#} KB";
     }
     private bool hasUnsavedChanges;
@@ -297,9 +303,10 @@ public partial class MainWindow : Window
         var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
-            $"{added} arquivo(s) vinculado(s) à timeline com duração provisória (vídeo/áudio: 5s; imagem: 4s)." +
+            $"{added} arquivo(s) vinculado(s) à timeline. WAV PCM/float reconhecido usa duração real; " +
+            "outros áudios e vídeos usam 5s provisórios e imagens, 4s." +
             duplicateMessage + issueText +
-            "\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
+            "\nArquivos originais não foram copiados nem alterados. Cabeçalhos WAV/PNG são lidos sem decodificação.",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
@@ -648,8 +655,14 @@ public partial class MainWindow : Window
                 BorderBrush = clip.Id == selectedId ? Brushes.White : hasWarning ? Brush("#F5BC53") : Brush("#708196"),
                 BorderThickness = new Thickness(clip.Id == selectedId || hasWarning ? 2 : 1),
                 Opacity = preview ? .72 : 1,
-                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração provisória {clip.Duration.Seconds}s" +
+                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração do clipe {clip.Duration.Seconds}s" +
                     (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
+                    (linked?.DurationTicks is long originalTicks
+                        ? $"\nDuração WAV original aferida: {TimeSpan.FromTicks(originalTicks).TotalSeconds:0.###}s"
+                        : linked is { Kind: MediaKind.Audio or MediaKind.Video }
+                            ? "\nDuração original não aferida — inserção provisória" : "") +
+                    (linked?.PixelWidth is int width && linked.PixelHeight is int height
+                        ? $"\nDimensões PNG: {width} × {height}px" : "") +
                     (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
                     (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
                 Child = content
