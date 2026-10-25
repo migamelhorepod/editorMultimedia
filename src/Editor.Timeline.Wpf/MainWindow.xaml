@@ -1,0 +1,48 @@
+<Window x:Class="Editor.Timeline.Wpf.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Editor Multimídia — POC-001" Width="1150" Height="720" MinWidth="760" MinHeight="500" Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown" PreviewMouseWheel="Window_PreviewMouseWheel" Background="#171B25" Foreground="#EDF0F6">
+<DockPanel>
+  <StackPanel DockPanel.Dock="Top" Orientation="Vertical">
+    <Menu Background="#242A39" Foreground="#EDF0F6">
+      <MenuItem Header="_Arquivo">
+        <MenuItem Header="Nova demonstração" Click="NewProject_Click" InputGestureText="Ctrl+N"/>
+        <MenuItem Header="Abrir projeto..." Click="OpenProject_Click" InputGestureText="Ctrl+O"/>
+        <Separator/>
+        <MenuItem Header="Salvar projeto" Click="SaveProject_Click" InputGestureText="Ctrl+S"/>
+        <MenuItem Header="Salvar como..." Click="SaveAsProject_Click" InputGestureText="Ctrl+Shift+S"/>
+      </MenuItem>
+    </Menu>
+    <Border Background="#252B3A" Padding="14"><StackPanel><TextBlock Text="EDITOR MULTIMÍDIA  /  POC-001" FontSize="18" FontWeight="Bold"/><TextBlock Text="Timeline interativa · .NET 10 · WPF · sem reprodução de vídeo" Foreground="#B5C0D2" Margin="0,4,0,0"/></StackPanel></Border>
+    <WrapPanel Margin="12,10,12,8" VerticalAlignment="Center">
+      <Button Click="SaveProject_Click" ToolTip="Salvar projeto (Ctrl+S) — só o disquete salva" Margin="0,0,15,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Salvar projeto">
+        <Viewbox Width="18" Height="18"><Canvas Width="24" Height="24"><Path Fill="#EDF0F6" Data="M17 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.3 19 9 17.7 9 16S10.3 13 12 13 15 14.3 15 16 13.7 19 12 19ZM6 5H16V10H6V5ZM14 6H16V9H14V6Z"/></Canvas></Viewbox>
+      </Button>
+      <Button Click="Undo_Click" ToolTip="Desfazer (Ctrl+Z)" Margin="0,0,7,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Desfazer">
+        <Viewbox Width="18" Height="18"><Canvas Width="1792" Height="1792"><Path Fill="#EDF0F6" Data="M1536 640q0 -156 -61 -298t-164 -245t-245 -164t-298 -61q-172 0 -327 72.5t-264 204.5q-7 10 -6.5 22.5t8.5 20.5l137 138q10 9 25 9q16 -2 23 -12q73 -95 179 -147t225 -52q104 0 198.5 40.5t163.5 109.5t109.5 163.5t40.5 198.5t-40.5 198.5t-109.5 163.5 t-163.5 109.5t-198.5 40.5q-98 0 -188 -35.5t-160 -101.5l137 -138q31 -30 14 -69q-17 -40 -59 -40h-448q-26 0 -45 19t-19 45v448q0 42 40 59q39 17 69 -14l130 -129q107 101 244.5 156.5t284.5 55.5q156 0 298 -61t245 -164t164 -245t61 -298z" RenderTransform="1,0,0,-1,0,1536"/></Canvas></Viewbox>
+      </Button>
+      <Button Click="Redo_Click" ToolTip="Refazer (Ctrl+Y)" Margin="0,0,7,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Refazer">
+        <Viewbox Width="18" Height="18"><Canvas Width="1792" Height="1792"><Path Fill="#EDF0F6" Data="M1536 1280v-448q0 -26 -19 -45t-45 -19h-448q-42 0 -59 40q-17 39 14 69l138 138q-148 137 -349 137q-104 0 -198.5 -40.5t-163.5 -109.5t-109.5 -163.5t-40.5 -198.5t40.5 -198.5t109.5 -163.5t163.5 -109.5t198.5 -40.5q119 0 225 52t179 147q7 10 23 12q15 0 25 -9 l137 -138q9 -8 9.5 -20.5t-7.5 -22.5q-109 -132 -264 -204.5t-327 -72.5q-156 0 -298 61t-245 164t-164 245t-61 298t61 298t164 245t245 164t298 61q147 0 284.5 -55.5t244.5 -156.5l130 129q29 31 70 14q39 -17 39 -59z" RenderTransform="1,0,0,-1,0,1536"/></Canvas></Viewbox>
+      </Button>
+      <!-- Ações principais e ações do menu contextual usam os mesmos comandos e ícones. -->
+      <StackPanel x:Name="ClipActionsToolbar" Orientation="Horizontal"/>
+      <Button Click="SplitAtPlayhead_Click" ToolTip="Dividir no cursor (Ctrl+B)" Margin="0,0,7,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Dividir no cursor">
+        <Viewbox Width="18" Height="18"><Canvas Width="1792" Height="1792"><Path Fill="#EDF0F6" Data="M960 640q26 0 45 -19t19 -45t-19 -45t-45 -19t-45 19t-19 45t19 45t45 19zM1260 576l507 -398q28 -20 25 -56q-5 -35 -35 -51l-128 -64q-13 -7 -29 -7q-17 0 -31 8l-690 387l-110 -66q-8 -4 -12 -5q14 -49 10 -97q-7 -77 -56 -147.5t-132 -123.5q-132 -84 -277 -84 q-136 0 -222 78q-90 84 -79 207q7 76 56 147t131 124q132 84 278 84q83 0 151 -31q9 13 22 22l122 73l-122 73q-13 9 -22 22q-68 -31 -151 -31q-146 0 -278 84q-82 53 -131 124t-56 147q-5 59 15.5 113t63.5 93q85 79 222 79q145 0 277 -84q83 -52 132 -123t56 -148 q4 -48 -10 -97q4 -1 12 -5l110 -66l690 387q14 8 31 8q16 0 29 -7l128 -64q30 -16 35 -51q3 -36 -25 -56zM579 836q46 42 21 108t-106 117q-92 59 -192 59q-74 0 -113 -36q-46 -42 -21 -108t106 -117q92 -59 192 -59q74 0 113 36zM494 91q81 51 106 117t-21 108 q-39 36 -113 36q-100 0 -192 -59q-81 -51 -106 -117t21 -108q39 -36 113 -36q100 0 192 59zM672 704l96 -58v11q0 36 33 56l14 8l-79 47l-26 -26q-3 -3 -10 -11t-12 -12q-2 -2 -4 -3.5t-3 -2.5zM896 480l96 -32l736 576l-128 64l-768 -431v-113l-160 -96l9 -8q2 -2 7 -6 q4 -4 11 -12t11 -12l26 -26zM1600 64l128 64l-520 408l-177 -138q-2 -3 -13 -7z" RenderTransform="1,0,0,-1,0,1536"/></Canvas></Viewbox>
+      </Button>
+      <Button Click="GoStart_Click" ToolTip="Ir ao início (Home)" Margin="0,0,7,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Ir ao início">
+        <Viewbox Width="18" Height="18"><Canvas Width="1792" Height="1792"><Path Fill="#EDF0F6" Data="M1747 1395q19 19 32 13t13 -32v-1472q0 -26 -13 -32t-32 13l-710 710q-9 9 -13 19v-710q0 -26 -13 -32t-32 13l-710 710q-9 9 -13 19v-678q0 -26 -19 -45t-45 -19h-128q-26 0 -45 19t-19 45v1408q0 26 19 45t45 19h128q26 0 45 -19t19 -45v-678q4 10 13 19l710 710 q19 19 32 13t13 -32v-710q4 10 13 19z" RenderTransform="1,0,0,-1,0,1536"/></Canvas></Viewbox>
+      </Button>
+      <Button Click="GoEnd_Click" ToolTip="Ir ao fim (End)" Margin="0,0,7,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Ir ao fim">
+        <Viewbox Width="18" Height="18"><Canvas Width="1792" Height="1792"><Path Fill="#EDF0F6" Data="M45 -115q-19 -19 -32 -13t-13 32v1472q0 26 13 32t32 -13l710 -710q9 -9 13 -19v710q0 26 13 32t32 -13l710 -710q9 -9 13 -19v678q0 26 19 45t45 19h128q26 0 45 -19t19 -45v-1408q0 -26 -19 -45t-45 -19h-128q-26 0 -45 19t-19 45v678q-4 -10 -13 -19l-710 -710 q-19 -19 -32 -13t-13 32v710q-4 -10 -13 -19z" RenderTransform="1,0,0,-1,0,1536"/></Canvas></Viewbox>
+      </Button>
+      <Button Content="◆ +" Click="AddMarker_Click" ToolTip="Adicionar marcador no cursor (M)" AutomationProperties.Name="Adicionar marcador" Margin="0,0,7,6" Padding="8,6" MinWidth="42"/>
+      <Button Content="◆ −" Click="RemoveMarker_Click" ToolTip="Remover marcador no cursor (Shift+M)" AutomationProperties.Name="Remover marcador" Margin="0,0,10,6" Padding="8,6" MinWidth="42"/>
+      <CheckBox x:Name="SnapToggle" Content="Encaixar a cada 0,5s" IsChecked="False" Checked="Snap_Changed" Unchecked="Snap_Changed" VerticalAlignment="Center" Margin="8,0,12,6"/>
+      <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="10,0,5,6"/>
+      <Slider x:Name="ZoomSlider" Width="150" Minimum="10" Maximum="60" Value="25" TickFrequency="5" ValueChanged="Zoom_Changed" Margin="0,0,8,6"/>
+      <Button Content="Ajustar zoom" Click="FitZoom_Click" Margin="0,0,6,6" Padding="10,6"/>
+    </WrapPanel>
+  </StackPanel>
+  <Border DockPanel.Dock="Bottom" Background="#252B3A" Padding="12"><TextBlock x:Name="Status" Text="Selecione um clipe. Arraste clipes secundários; use os botões para editar." TextWrapping="Wrap"/></Border>
+  <ScrollViewer x:Name="Viewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#11151E">
+    <Canvas x:Name="Surface" Height="520" Width="1200" Background="#11151E" MouseLeftButtonDown="Surface_MouseLeftButtonDown" MouseMove="Surface_MouseMove" MouseLeftButtonUp="Surface_MouseLeftButtonUp" MouseLeave="Surface_MouseLeave"/>
+  </ScrollViewer>
+</DockPanel>
+</Window>

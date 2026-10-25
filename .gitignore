@@ -1,0 +1,28 @@
+# Arquivos gerados pelo .NET / Visual Studio
+[Bb]in/
+[Oo]bj/
+.vs/
+TestResults/
+**/TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Saídas e caches
+artifacts/
+coverage/
+*.coverage
+*.coveragexml
+*.log
+*.tmp
+
+# Conteúdo local de projetos e mídia (não enviar vídeos privados ao Git)
+midias-locais/
+projetos-locais/
+exportacoes/
+
+# Sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
