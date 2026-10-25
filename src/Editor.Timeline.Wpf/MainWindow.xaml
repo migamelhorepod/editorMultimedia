@@ -3,7 +3,8 @@
   <StackPanel DockPanel.Dock="Top" Orientation="Vertical">
     <Menu Background="#242A39" Foreground="#EDF0F6">
       <MenuItem Header="_Arquivo">
-        <MenuItem Header="Nova demonstração" Click="NewProject_Click" InputGestureText="Ctrl+N"/>
+        <MenuItem Header="Novo projeto vazio" Click="NewProject_Click" InputGestureText="Ctrl+N"/>
+        <MenuItem Header="Carregar demonstração" Click="NewDemo_Click"/>
         <MenuItem Header="Abrir projeto..." Click="OpenProject_Click" InputGestureText="Ctrl+O"/>
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
@@ -44,8 +45,64 @@
     </WrapPanel>
   </StackPanel>
   <Border DockPanel.Dock="Bottom" Background="#252B3A" Padding="12"><TextBlock x:Name="Status" Text="Selecione um clipe. Arraste clipes secundários; use os botões para editar." TextWrapping="Wrap"/></Border>
-  <ScrollViewer x:Name="Viewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#11151E">
-    <Canvas x:Name="Surface" Height="520" Width="1200" Background="#11151E" MouseLeftButtonDown="Surface_MouseLeftButtonDown" MouseMove="Surface_MouseMove" MouseLeftButtonUp="Surface_MouseLeftButtonUp" MouseLeave="Surface_MouseLeave"/>
-  </ScrollViewer>
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="270"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+    <Border Grid.Column="0" Background="#1C2230" BorderBrush="#3A4657" BorderThickness="0,0,1,0" Padding="10">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+          <TextBlock Text="MÍDIAS DO PROJETO" FontSize="14" FontWeight="Bold" Margin="0,0,0,8"/>
+          <TextBox x:Name="MediaSearchBox" ToolTip="Buscar mídia pelo nome ou caminho" TextChanged="MediaSearch_Changed"
+                   Margin="0,0,0,7" Padding="7,5"/>
+          <ComboBox x:Name="MediaKindFilter" SelectionChanged="MediaFilter_Changed" Margin="0,0,0,7">
+            <ComboBoxItem Content="Todos os tipos" IsSelected="True"/>
+            <ComboBoxItem Content="Vídeos"/>
+            <ComboBoxItem Content="Áudios"/>
+            <ComboBoxItem Content="Imagens"/>
+            <ComboBoxItem Content="Indisponíveis"/>
+          </ComboBox>
+          <WrapPanel>
+            <Button Content="Importar…" Click="ImportMedia_Click" ToolTip="Adicionar arquivos ao projeto (Ctrl+I)" Padding="9,5" Margin="0,0,6,6"/>
+            <Button x:Name="InsertMediaButton" Content="Usar no cursor" Click="InsertFromCatalog_Click"
+                    ToolTip="Inserir mais uma ocorrência da mídia, sem importar de novo" IsEnabled="False" Padding="9,5" Margin="0,0,0,6"/>
+          </WrapPanel>
+          <WrapPanel>
+            <Button x:Name="LocateMediaButton" Content="Localizar clipe" Click="LocateCatalogClip_Click"
+                    IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
+            <Button x:Name="RelinkMediaButton" Content="Relocalizar…" Click="RelinkCatalogMedia_Click"
+                    IsEnabled="False" Padding="8,5" Margin="0,0,0,6"/>
+          </WrapPanel>
+          <Button x:Name="RemoveMediaButton" Content="Remover mídia não utilizada" Click="RemoveUnusedMedia_Click"
+                  ToolTip="Não apaga o arquivo original; disponível só quando nenhum clipe usa a mídia"
+                  IsEnabled="False" Padding="8,5" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+          <TextBlock x:Name="MediaSummary" Text="0 mídias" Foreground="#B5C0D2" Margin="0,6,0,0" FontSize="11"/>
+        </StackPanel>
+        <ListBox x:Name="MediaList" SelectionChanged="MediaSelection_Changed"
+                 MouseDoubleClick="MediaList_MouseDoubleClick"
+                 Background="#1C2230" BorderBrush="#3A4657"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Margin="3,5">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" Foreground="#EDF0F6"/>
+                <TextBlock Text="{Binding Details}" FontSize="11"
+                           Foreground="#BDC8D9" TextWrapping="Wrap"/>
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+    <ScrollViewer x:Name="Viewport" Grid.Column="1"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#11151E">
+      <Canvas x:Name="Surface" Height="520" Width="1200" Background="#11151E"
+              MouseLeftButtonDown="Surface_MouseLeftButtonDown"
+              MouseMove="Surface_MouseMove" MouseLeftButtonUp="Surface_MouseLeftButtonUp"
+              MouseLeave="Surface_MouseLeave"/>
+    </ScrollViewer>
+  </Grid>
 </DockPanel>
 </Window>
