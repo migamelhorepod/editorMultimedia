@@ -155,12 +155,12 @@ public partial class MainWindow : Window
     private void ResetLoadedProject(EditorProject project, string? path)
     {
         // A replacement is committed only after the file was fully parsed and validated.
-        session = new TimelineSession(project.Timeline);
+        session = new TimelineSession(project.Timeline, project.MediaItems);
         projectId = project.Id;
         projectName = project.Name;
         projectPath = path;
         savedState = session.Current;
-        mediaAssets = project.MediaItems.ToList();
+        mediaAssets = session.Media.ToList();
         savedMedia = mediaAssets.ToArray();
         RefreshMediaPresence();
         hasUnsavedChanges = false;
@@ -229,7 +229,7 @@ public partial class MainWindow : Window
         var missing = availableMedia.Count(pair => !pair.Value);
         MessageBox.Show(this, missing == 0
             ? $"{mediaAssets.Count} mídias vinculadas; nenhuma indisponível nesta verificação."
-            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nOs arquivos poderão ser localizados novamente numa etapa posterior.",
+            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nSelecione um clipe indisponível e use Arquivo > Relocalizar mídia selecionada.",
             "Verificação de mídias", MessageBoxButton.OK,
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
@@ -260,8 +260,9 @@ public partial class MainWindow : Window
                 var proposed = MediaReferences.PlanClip(session.Current, asset,
                     MediaTime.FromSeconds((decimal)playheadSeconds), Guid.NewGuid());
                 // Commit first; catalog entry is recorded only if insertion succeeds.
-                session.Execute(state => TimelineEngine.Insert(state, state.Version, proposed));
-                mediaAssets.Add(asset);
+                session.Execute(state => TimelineEngine.Insert(state, state.Version, proposed),
+                    mediaAssets.Append(asset).ToArray());
+                mediaAssets = session.Media.ToList();
                 availableMedia[asset.Id] = true;
                 selectedId = proposed.Id;
                 added++;
@@ -284,6 +285,44 @@ public partial class MainWindow : Window
             "\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+    }
+
+    private void RelinkSelectedMedia_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = Selected();
+        if (clip is null) return;
+        var media = mediaAssets.FirstOrDefault(m => m.Id == clip.MediaId);
+        if (media is null) return;
+
+        var filter = media.Kind switch
+        {
+            MediaKind.Video => "Arquivos de vídeo|*.mp4;*.mov;*.mkv;*.avi;*.webm",
+            MediaKind.Audio => "Arquivos de áudio|*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg",
+            MediaKind.Image => "Arquivos de imagem|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
+            _ => "Todos os arquivos|*.*"
+        };
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Relocalizar {media.DisplayName} — selecionar novo arquivo",
+            Filter = filter + "|Todos os arquivos|*.*",
+            CheckFileExists = true, Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            session.RelinkMedia(media.Id, dialog.FileName);
+            mediaAssets = session.Media.ToList();
+            RefreshMediaPresence();
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+        {
+            MessageBox.Show(this,
+                $"Não foi possível relocalizar a mídia. A referência original foi preservada.\n\n{ex.Message}",
+                "Relocalização não realizada", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void SaveProject_Click(object sender, RoutedEventArgs e) => SaveProject();
@@ -1083,11 +1122,16 @@ public partial class MainWindow : Window
         var independent = MakeClipMenuItem("Tornar independente", "unlink", Independent_Click);
         independent.IsEnabled = clip.Track != TimelineEngine.MainTrack && clip.Association == AssociationKind.Positioned;
         menu.Items.Add(independent);
+        var relink = MakeClipMenuItem("Relocalizar mídia...", "folder", RelinkSelectedMedia_Click);
+        relink.IsEnabled = mediaAssets.Any(m => m.Id == clip.MediaId);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(relink);
         menu.IsOpen = true;
     }
 
     private static readonly Dictionary<string, string> MenuIconPaths = new()
     {
+        ["folder"] = "M1600 512H800L640 352H192Q128 352 128 416V1376Q128 1440 192 1440H1600Q1664 1440 1664 1376V576Q1664 512 1600 512Z",
         ["copy"] = "M1696 1152q40 0 68 -28t28 -68v-1216q0 -40 -28 -68t-68 -28h-960q-40 0 -68 28t-28 68v288h-544q-40 0 -68 28t-28 68v672q0 40 20 88t48 76l408 408q28 28 76 48t88 20h416q40 0 68 -28t28 -68v-328q68 40 128 40h416zM1152 939l-299 -299h299v299zM512 1323l-299 -299 h299v299zM708 676l316 316v416h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h512v256q0 40 20 88t48 76zM1664 -128v1152h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h896z",
         ["trash"] = "M512 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM768 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1024 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576 q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1152 76v948h-896v-948q0 -22 7 -40.5t14.5 -27t10.5 -8.5h832q3 0 10.5 8.5t14.5 27t7 40.5zM480 1152h448l-48 117q-7 9 -17 11h-317q-10 -2 -17 -11zM1408 1120v-64q0 -14 -9 -23t-23 -9h-96v-948q0 -83 -47 -143.5t-113 -60.5h-832 q-66 0 -113 58.5t-47 141.5v952h-96q-14 0 -23 9t-9 23v64q0 14 9 23t23 9h309l70 167q15 37 54 63t79 26h320q40 0 79 -26t54 -63l70 -167h309q14 0 23 -9t9 -23z",
         ["unlink"] = "M439 265l-256 -256q-11 -9 -23 -9t-23 9q-9 10 -9 23t9 23l256 256q10 9 23 9t23 -9q9 -10 9 -23t-9 -23zM608 224v-320q0 -14 -9 -23t-23 -9t-23 9t-9 23v320q0 14 9 23t23 9t23 -9t9 -23zM384 448q0 -14 -9 -23t-23 -9h-320q-14 0 -23 9t-9 23t9 23t23 9h320 q14 0 23 -9t9 -23zM1648 320q0 -120 -85 -203l-147 -146q-83 -83 -203 -83q-121 0 -204 85l-334 335q-21 21 -42 56l239 18l273 -274q27 -27 68 -27.5t68 26.5l147 146q28 28 28 67q0 40 -28 68l-274 275l18 239q35 -21 56 -42l336 -336q84 -86 84 -204zM1031 1044l-239 -18 l-273 274q-28 28 -68 28q-39 0 -68 -27l-147 -146q-28 -28 -28 -67q0 -40 28 -68l274 -274l-18 -240q-35 21 -56 42l-336 336q-84 86 -84 204q0 120 85 203l147 146q83 83 203 83q121 0 204 -85l334 -335q21 -21 42 -56zM1664 960q0 -14 -9 -23t-23 -9h-320q-14 0 -23 9 t-9 23t9 23t23 9h320q14 0 23 -9t9 -23zM1120 1504v-320q0 -14 -9 -23t-23 -9t-23 9t-9 23v320q0 14 9 23t23 9t23 -9t9 -23zM1527 1353l-256 -256q-11 -9 -23 -9t-23 9q-9 10 -9 23t9 23l256 256q10 9 23 9t23 -9q9 -10 9 -23t-9 -23z",
@@ -1155,8 +1199,27 @@ public partial class MainWindow : Window
         Draw();
     }
     private Clip? Selected() => selectedId is Guid id ? session.Current.Clips.FirstOrDefault(c => c.Id == id) : null;
-    private void Undo_Click(object sender, RoutedEventArgs e) { if (session.CanUndo) { session.Undo(); UpdateDirty(); if (selectedId is Guid id && session.Current.Clips.All(c => c.Id != id)) selectedId = null; Draw(); } }
-    private void Redo_Click(object sender, RoutedEventArgs e) { if (session.CanRedo) { session.Redo(); UpdateDirty(); if (selectedId is Guid id && session.Current.Clips.All(c => c.Id != id)) selectedId = null; Draw(); } }
+    private void Undo_Click(object sender, RoutedEventArgs e)
+    {
+        if (!session.CanUndo) return;
+        session.Undo();
+        mediaAssets = session.Media.ToList();
+        RefreshMediaPresence();
+        UpdateDirty();
+        if (selectedId is Guid id && session.Current.Clips.All(c => c.Id != id)) selectedId = null;
+        Draw();
+    }
+
+    private void Redo_Click(object sender, RoutedEventArgs e)
+    {
+        if (!session.CanRedo) return;
+        session.Redo();
+        mediaAssets = session.Media.ToList();
+        RefreshMediaPresence();
+        UpdateDirty();
+        if (selectedId is Guid id && session.Current.Clips.All(c => c.Id != id)) selectedId = null;
+        Draw();
+    }
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
         var c = Selected(); if (c is null) return;
