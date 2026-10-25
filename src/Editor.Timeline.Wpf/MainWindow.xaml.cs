@@ -352,13 +352,15 @@ public partial class MainWindow : Window
     private void UpdateCatalogActions()
     {
         if (InsertMediaButton is null || LocateMediaButton is null ||
-            RelinkMediaButton is null || RemoveMediaButton is null) return;
+            RelinkMediaButton is null || RemoveMediaButton is null ||
+            RefreshMetadataButton is null) return;
         var item = MediaList?.SelectedItem as MediaListItem;
         var hasSelected = item is not null;
         var uses = item?.Usages ?? 0;
         InsertMediaButton.IsEnabled = hasSelected && !item!.Missing;
         LocateMediaButton.IsEnabled = uses > 0;
         RelinkMediaButton.IsEnabled = hasSelected;
+        RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
         RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
     }
 
@@ -444,6 +446,26 @@ public partial class MainWindow : Window
         catch (MediaReferenceException ex)
         {
             MessageBox.Show(this, ex.Message, "Operação não permitida",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is null) return;
+        try
+        {
+            session.RefreshMediaMetadata(asset.Id);
+            mediaAssets = session.Media.ToList();
+            availableMedia[asset.Id] = MediaReferences.IsAvailable(asset);
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, ex.Message, "Não foi possível atualizar os dados",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -661,7 +683,7 @@ public partial class MainWindow : Window
                         ? $"\nDuração WAV original aferida: {TimeSpan.FromTicks(originalTicks).TotalSeconds:0.###}s"
                         : linked is { Kind: MediaKind.Audio or MediaKind.Video }
                             ? "\nDuração original não aferida — inserção provisória" : "") +
-                    (linked?.PixelWidth is int width && linked.PixelHeight is int height
+                    (linked?.PixelWidth is int width && linked?.PixelHeight is int height
                         ? $"\nDimensões PNG: {width} × {height}px" : "") +
                     (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
                     (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),

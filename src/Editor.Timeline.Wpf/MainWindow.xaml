@@ -72,6 +72,10 @@
             <Button x:Name="LocateMediaButton" Content="Localizar clipe" Click="LocateCatalogClip_Click"
                     IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
             <Button x:Name="RelinkMediaButton" Content="Relocalizar…" Click="RelinkCatalogMedia_Click"
+                    IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
+            <Button x:Name="RefreshMetadataButton" Content="Atualizar dados"
+                    Click="RefreshCatalogMetadata_Click"
+                    ToolTip="Ler novamente duração WAV ou dimensões PNG do arquivo selecionado"
                     IsEnabled="False" Padding="8,5" Margin="0,0,0,6"/>
           </WrapPanel>
           <Button x:Name="RemoveMediaButton" Content="Remover mídia não utilizada" Click="RemoveUnusedMedia_Click"
