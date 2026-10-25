@@ -1083,6 +1083,10 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // While typing in the catalog search/filter, keyboard shortcuts for
+        // timeline editing must not consume text, arrows, Delete or Ctrl+Z.
+        if (Keyboard.FocusedElement is TextBox or ComboBox) return;
+
         if (e.Key == Key.Escape && (draggingMarkerId is not null || scrubbingRuler))
         {
             if (draggingMarkerId is not null) playheadSeconds = preDragPlayhead;
