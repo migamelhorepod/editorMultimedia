@@ -82,6 +82,21 @@ public static class MediaReferences
         return updated;
     }
 
+    /// <summary>
+    /// Remove a project catalog entry only when no clip refers to it.
+    /// The physical file is never deleted.
+    /// </summary>
+    public static IReadOnlyList<MediaAsset> RemoveUnused(
+        IReadOnlyList<MediaAsset> catalog, TimelineState timeline, Guid mediaId)
+    {
+        if (!catalog.Any(m => m.Id == mediaId))
+            throw new MediaReferenceException("A mídia não está vinculada ao projeto.");
+        if (timeline.Clips.Any(c => c.MediaId == mediaId))
+            throw new MediaReferenceException(
+                "Esta mídia ainda possui clipes na timeline e não pode ser removida do catálogo.");
+        return catalog.Where(m => m.Id != mediaId).ToArray();
+    }
+
     public static bool SameSource(string a, string b) =>
         string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
