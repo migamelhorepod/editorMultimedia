@@ -24,6 +24,9 @@ public partial class MainWindow : Window
     private string projectName = "Demonstração";
     private string? projectPath;
     private TimelineState savedState;
+    private List<MediaAsset> mediaAssets = new();
+    private IReadOnlyList<MediaAsset> savedMedia = Array.Empty<MediaAsset>();
+    private readonly Dictionary<Guid, bool> availableMedia = new();
     private bool hasUnsavedChanges;
     private Guid? selectedId;
     private Guid? draggingId;
@@ -82,7 +85,8 @@ public partial class MainWindow : Window
 
     private void UpdateDirty()
     {
-        hasUnsavedChanges = !ProjectStore.SameContent(session.Current, savedState);
+        hasUnsavedChanges = !ProjectStore.SameContent(session.Current, savedState) ||
+            !mediaAssets.SequenceEqual(savedMedia);
         UpdateWindowTitle();
     }
 
@@ -115,10 +119,11 @@ public partial class MainWindow : Window
         try
         {
             var name = NameFromPath(destination);
-            ProjectStore.Save(destination, new EditorProject(projectId, name, session.Current));
+            ProjectStore.Save(destination, new EditorProject(projectId, name, session.Current, mediaAssets.ToArray()));
             projectPath = destination;
             projectName = name;
             savedState = session.Current;
+            savedMedia = mediaAssets.ToArray();
             hasUnsavedChanges = false;
             UpdateWindowTitle();
             Draw();
@@ -155,6 +160,9 @@ public partial class MainWindow : Window
         projectName = project.Name;
         projectPath = path;
         savedState = session.Current;
+        mediaAssets = project.MediaItems.ToList();
+        savedMedia = mediaAssets.ToArray();
+        RefreshMediaPresence();
         hasUnsavedChanges = false;
         selectedId = null;
         draggingId = null;
@@ -205,6 +213,77 @@ public partial class MainWindow : Window
                 $"Não foi possível abrir o projeto. O projeto atual não foi substituído.\n\n{ex.Message}",
                 "Falha ao abrir", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void RefreshMediaPresence()
+    {
+        availableMedia.Clear();
+        foreach (var asset in mediaAssets)
+            availableMedia[asset.Id] = MediaReferences.IsAvailable(asset);
+    }
+
+    private void CheckMedia_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshMediaPresence();
+        Draw();
+        var missing = availableMedia.Count(pair => !pair.Value);
+        MessageBox.Show(this, missing == 0
+            ? $"{mediaAssets.Count} mídias vinculadas; nenhuma indisponível nesta verificação."
+            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nOs arquivos poderão ser localizados novamente numa etapa posterior.",
+            "Verificação de mídias", MessageBoxButton.OK,
+            missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    }
+
+    private void ImportMedia_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Selecionar arquivos de vídeo, áudio ou imagem",
+            Filter = "Mídias compatíveis|*.mp4;*.mov;*.mkv;*.avi;*.webm;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.png;*.jpg;*.jpeg;*.webp;*.bmp|Todos os arquivos|*.*",
+            CheckFileExists = true, Multiselect = true
+        };
+        if (picker.ShowDialog(this) != true) return;
+
+        var added = 0;
+        var ignored = 0;
+        var errors = new List<string>();
+        foreach (var path in picker.FileNames)
+        {
+            try
+            {
+                var asset = MediaReferences.InspectFile(path);
+                if (mediaAssets.Any(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath)))
+                {
+                    ignored++;
+                    continue;
+                }
+                var proposed = MediaReferences.PlanClip(session.Current, asset,
+                    MediaTime.FromSeconds((decimal)playheadSeconds), Guid.NewGuid());
+                // Commit first; catalog entry is recorded only if insertion succeeds.
+                session.Execute(state => TimelineEngine.Insert(state, state.Version, proposed));
+                mediaAssets.Add(asset);
+                availableMedia[asset.Id] = true;
+                selectedId = proposed.Id;
+                added++;
+            }
+            catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+                IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+            {
+                errors.Add($"{System.IO.Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+        UpdateDirty();
+        Draw();
+        var duplicateMessage = ignored > 0
+            ? "\nO arquivo não será adicionado pois já existe na biblioteca" : "";
+        var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
+            string.Join("\n", errors.Take(10));
+        MessageBox.Show(this,
+            $"{added} arquivo(s) vinculado(s) à timeline com duração provisória (vídeo/áudio: 5s; imagem: 4s)." +
+            duplicateMessage + issueText +
+            "\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
+            "Importação de mídias", MessageBoxButton.OK,
+            errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
 
     private void SaveProject_Click(object sender, RoutedEventArgs e) => SaveProject();
@@ -316,12 +395,16 @@ public partial class MainWindow : Window
             // The warning belongs to the clip, not to a separate acknowledgement
             // command. Use a compact overlay that can be reused for other media
             // conditions (e.g. unavailable media) in later POCs.
+            var linked = mediaAssets.FirstOrDefault(m => m.Id == clip.MediaId);
+            var missingMedia = linked is not null && (!availableMedia.TryGetValue(linked.Id, out var present) || !present);
+            var hasWarning = clip.OrphanNotice || missingMedia;
             var content = new Grid();
             content.Children.Add(new TextBlock
             {
-                Text = $"{clip.Kind}  {clip.Duration.Seconds:0.#}s",
+                Text = linked is null ? $"{clip.Kind}  {clip.Duration.Seconds:0.#}s"
+                    : $"{linked.DisplayName}  {clip.Duration.Seconds:0.#}s",
                 Foreground = Brushes.White,
-                Margin = new Thickness(7, 8, clip.OrphanNotice ? 23 : 2, 0),
+                Margin = new Thickness(7, 8, hasWarning ? 23 : 2, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
             });
             // Two resize grips, with the clip body reserved for moving/selection.
@@ -353,16 +436,18 @@ public partial class MainWindow : Window
                     ToolTip = "Arraste para ajustar o fim do clipe"
                 });
             }
-            if (clip.OrphanNotice)
+            if (hasWarning)
                 content.Children.Add(CreateClipWarningBadge());
             var rect = new Border {
                 Width = Math.Max(8, Seconds(clip.Duration) * Scale - 2), Height = TrackHeight - 9,
                 CornerRadius = new CornerRadius(4),
                 Background = Brush(clip.Kind switch { MediaKind.Audio => "#347B67", MediaKind.Image => "#8058A3", _ => "#346F9B" }),
-                BorderBrush = clip.Id == selectedId ? Brushes.White : clip.OrphanNotice ? Brush("#F5BC53") : Brush("#708196"),
-                BorderThickness = new Thickness(clip.Id == selectedId || clip.OrphanNotice ? 2 : 1),
+                BorderBrush = clip.Id == selectedId ? Brushes.White : hasWarning ? Brush("#F5BC53") : Brush("#708196"),
+                BorderThickness = new Thickness(clip.Id == selectedId || hasWarning ? 2 : 1),
                 Opacity = preview ? .72 : 1,
-                ToolTip = $"{clip.Kind} | {clip.Association} | início {clip.Start.Seconds}s | duração {clip.Duration.Seconds}s" +
+                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração provisória {clip.Duration.Seconds}s" +
+                    (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
+                    (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
                     (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
                 Child = content
             };
@@ -389,6 +474,7 @@ public partial class MainWindow : Window
                 ? " | Sem trilha secundária disponível"
                 : resolvedPreviewTrack is int lane && lane != dragPreviewTrack
                     ? $" | Realocação automática: Trilha {lane + 1}" : "" : "") +
+            $" | Arquivos vinculados: {mediaAssets.Count} (indisponíveis: {availableMedia.Count(p => !p.Value)})" +
             $" | Marcadores: {session.Current.MarkerItems.Count}" +
             $" | Encaixe: {(SnapToggle?.IsChecked == true ? "0,5s" : "desligado")}" +
             " | M: marcar · Shift+M: remover · Alt+←/→: marcadores · Ctrl+roda: zoom · Ctrl+←/→: clipes · Ctrl+↑/↓: trilhas · Ctrl+D: duplicar · Ctrl+B: dividir · Ctrl+Z/Y: histórico";
@@ -831,6 +917,10 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.O)
         {
             OpenProject_Click(this, new RoutedEventArgs()); e.Handled = true; return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.I)
+        {
+            ImportMedia_Click(this, new RoutedEventArgs()); e.Handled = true; return;
         }
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
         {
