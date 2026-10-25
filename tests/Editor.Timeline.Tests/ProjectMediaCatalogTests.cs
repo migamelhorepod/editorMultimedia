@@ -20,7 +20,7 @@ public sealed class ProjectMediaCatalogTests
         public void Dispose() => Directory.Delete(Folder, true);
     }
 
-    private static TimelineState Main()
+    private static TimelineState SampleTimeline()
     {
         var video = new Clip(Guid.NewGuid(), Guid.NewGuid(),
             MediaKind.Video, 0, T(0), T(20));
@@ -58,7 +58,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("loop.wav");
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         var first = MediaReferences.PlanClip(session.Current, asset, T(0), Guid.NewGuid());
         session.Execute(s => TimelineEngine.Insert(s, s.Version, first));
         var second = MediaReferences.PlanClip(session.Current, asset, T(8), Guid.NewGuid());
@@ -77,7 +77,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("movie.mp4");
-        var state = Main();
+        var state = SampleTimeline();
         var a = MediaReferences.PlanClip(state, asset, T(0), Guid.NewGuid());
         state = TimelineEngine.Insert(state, state.Version, a).State;
         var b = MediaReferences.PlanClip(state, asset, T(1), Guid.NewGuid());
@@ -93,7 +93,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("used.mp3");
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         var clip = MediaReferences.PlanClip(session.Current, asset, T(2), Guid.NewGuid());
         session.Execute(s => TimelineEngine.Insert(s, s.Version, clip));
         var state = session.Current;
@@ -109,7 +109,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("available.png");
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         session.RemoveUnusedMedia(asset.Id);
         Assert.Empty(session.Media);
         Assert.True(File.Exists(asset.SourcePath));
@@ -128,7 +128,7 @@ public sealed class ProjectMediaCatalogTests
         using var tmp = new TempSource();
         var asset = tmp.Make("missing.png");
         File.Delete(asset.SourcePath);
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         session.RemoveUnusedMedia(asset.Id);
         Assert.Empty(session.Media);
         session.Undo();
@@ -140,7 +140,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("sound.wav");
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         var clip = MediaReferences.PlanClip(session.Current, asset, T(3), Guid.NewGuid());
         session.Execute(s => TimelineEngine.Insert(s, s.Version, clip));
         session.Execute(s => TimelineEngine.DeleteSecondary(s, s.Version, clip.Id));
@@ -162,7 +162,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("speech.wav");
-        var state = Main();
+        var state = SampleTimeline();
         var clip1 = MediaReferences.PlanClip(state, asset, T(1), Guid.NewGuid());
         state = TimelineEngine.Insert(state, state.Version, clip1).State;
         var clip2 = MediaReferences.PlanClip(state, asset, T(12), Guid.NewGuid());
@@ -179,7 +179,7 @@ public sealed class ProjectMediaCatalogTests
     {
         using var tmp = new TempSource();
         var asset = tmp.Make("some.wav");
-        var session = new TimelineSession(Main(), [asset]);
+        var session = new TimelineSession(SampleTimeline(), [asset]);
         Assert.Throws<MediaReferenceException>(() => session.RemoveUnusedMedia(Guid.NewGuid()));
         Assert.Equal(asset, Assert.Single(session.Media));
         Assert.False(session.CanUndo);

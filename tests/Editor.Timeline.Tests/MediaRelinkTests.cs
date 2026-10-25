@@ -143,7 +143,7 @@ public sealed class MediaRelinkTests
         Assert.Equal(newPath, session.Media[0].SourcePath);
         session.Undo(); // source relink
         Assert.Equal(asset.SourcePath, session.Media[0].SourcePath);
-        Assert.Single(session.Current.Clips.Where(c => c.Id == clip.Id));
+        Assert.Single(session.Current.Clips, c => c.Id == clip.Id);
         session.Undo(); // original import
         Assert.Empty(session.Media);
         Assert.DoesNotContain(session.Current.Clips, c => c.Id == clip.Id);
