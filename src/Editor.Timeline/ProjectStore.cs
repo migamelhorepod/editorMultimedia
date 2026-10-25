@@ -21,7 +21,7 @@ public sealed class ProjectFileException(string message, Exception? inner = null
 /// </summary>
 public static class ProjectStore
 {
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 3;
     public const int MaxFileBytes = 16 * 1024 * 1024;
     private const int MaxClips = 50_000;
     private const int MaxMarkers = 20_000;
@@ -86,7 +86,9 @@ public static class ProjectStore
             Media = project.MediaItems.Select(m => new MediaFile
             {
                 Id = m.Id, Kind = m.Kind, DisplayName = m.DisplayName,
-                SourcePath = m.SourcePath, SizeBytes = m.SizeBytes
+                SourcePath = m.SourcePath, SizeBytes = m.SizeBytes,
+                DurationTicks = m.DurationTicks,
+                PixelWidth = m.PixelWidth, PixelHeight = m.PixelHeight
             }).ToList()
         };
         var text = JsonSerializer.Serialize(file, JsonOptions);
@@ -103,11 +105,11 @@ public static class ProjectStore
         {
             var file = JsonSerializer.Deserialize<ProjectFile>(text, JsonOptions)
                 ?? throw new ProjectFileException("Arquivo de projeto vazio.");
-            // Backward-compatible with the v6.0 project format (no catalog).
-            if (file.FormatVersion is not (1 or FormatVersion))
+            // Backward-compatible with v6.0 (v1) and v6.1-v6.3 (v2).
+            if (file.FormatVersion is not (1 or 2 or FormatVersion))
                 throw new ProjectFileException($"Formato {file.FormatVersion} não compatível com esta versão do editor.");
             if (file.Clips is null || file.Markers is null || file.Clips.Count > MaxClips ||
-                file.Markers.Count > MaxMarkers || (file.FormatVersion == FormatVersion && file.Media is null) ||
+                file.Markers.Count > MaxMarkers || (file.FormatVersion >= 2 && file.Media is null) ||
                 file.Media?.Count > MaxMedia)
                 throw new ProjectFileException("Lista de mídias ou marcadores ausente ou excessiva.");
             if (file.Clips.Any(c => c is null) || file.Markers.Any(m => m is null) ||
@@ -118,7 +120,8 @@ public static class ProjectStore
                 c.ParentId, new MediaTime(c.ParentOffsetTicks), c.OrphanNotice, c.EffectsToken)).ToArray();
             var markers = file.Markers.Select(m => new TimelineMarker(m.Id, new MediaTime(m.AtTicks), m.Label!)).ToArray();
             var media = file.Media?.Select(m => new MediaAsset(m.Id, m.Kind,
-                m.DisplayName ?? string.Empty, m.SourcePath ?? string.Empty, m.SizeBytes)).ToArray()
+                m.DisplayName ?? string.Empty, m.SourcePath ?? string.Empty, m.SizeBytes,
+                m.DurationTicks, m.PixelWidth, m.PixelHeight)).ToArray()
                 ?? Array.Empty<MediaAsset>();
             var result = new EditorProject(file.ProjectId, file.Name ?? string.Empty,
                 new TimelineState(file.TimelineVersion, clips, markers), media);
@@ -205,6 +208,9 @@ public static class ProjectStore
         public string? DisplayName { get; set; }
         public string? SourcePath { get; set; }
         public long SizeBytes { get; set; }
+        public long? DurationTicks { get; set; }
+        public int? PixelWidth { get; set; }
+        public int? PixelHeight { get; set; }
     }
 
     private sealed class MarkerFile

@@ -1,12 +1,13 @@
 namespace Editor.Timeline;
 
 /// <summary>Metadata referencing a user-selected local file. No media bytes are copied.</summary>
-public sealed record MediaAsset(Guid Id, MediaKind Kind, string DisplayName, string SourcePath, long SizeBytes);
+public sealed record MediaAsset(Guid Id, MediaKind Kind, string DisplayName, string SourcePath, long SizeBytes,
+    long? DurationTicks = null, int? PixelWidth = null, int? PixelHeight = null);
 
 public sealed class MediaReferenceException(string message) : Exception(message);
 
 /// <summary>Initial POC catalog, not the future IFileAccessService.
-/// Inspection does not decode codecs or discover intrinsic duration.</summary>
+/// Only bounded WAV PCM/float and PNG header metadata are inspected; no decoding.</summary>
 public static class MediaReferences
 {
     private static readonly Dictionary<string, MediaKind> Supported = new(StringComparer.OrdinalIgnoreCase)
@@ -39,7 +40,9 @@ public static class MediaReferences
         var info = new FileInfo(full);
         if (!info.Exists || info.Length == 0)
             throw new MediaReferenceException("Arquivo de mídia indisponível ou vazio.");
-        return new MediaAsset(Guid.NewGuid(), kind, info.Name, full, info.Length);
+        var metadata = MediaMetadataProbe.Read(full, kind);
+        return new MediaAsset(Guid.NewGuid(), kind, info.Name, full, info.Length,
+            metadata.DurationTicks, metadata.PixelWidth, metadata.PixelHeight);
     }
 
     /// <summary>Presence check on load/import/manual action, never periodic scanning.</summary>
@@ -113,7 +116,13 @@ public static class MediaReferences
                 asset.SourcePath.Any(char.IsControl) || !Path.IsPathFullyQualified(asset.SourcePath) ||
                 !paths.Add(asset.SourcePath) || asset.SizeBytes <= 0 ||
                 !TryDetectKind(asset.SourcePath, out var kind) || kind != asset.Kind ||
-                Path.GetFileName(asset.SourcePath) != asset.DisplayName)
+                Path.GetFileName(asset.SourcePath) != asset.DisplayName ||
+                (asset.DurationTicks is long duration &&
+                    (asset.Kind != MediaKind.Audio || duration <= 0 || duration > TimeSpan.FromDays(7).Ticks)) ||
+                (asset.PixelWidth.HasValue != asset.PixelHeight.HasValue) ||
+                (asset.PixelWidth.HasValue && (asset.Kind != MediaKind.Image ||
+                    asset.PixelWidth.Value is <= 0 or > 100000 ||
+                    asset.PixelHeight!.Value is <= 0 or > 100000)))
                 throw new MediaReferenceException("Arquivo ou identificador de mídia inválido ou duplicado.");
         }
         foreach (var clip in timeline.Clips)
@@ -130,7 +139,11 @@ public static class MediaReferences
         TimelineEngine.Validate(state);
         if (playhead.Ticks < 0 || clipId == Guid.Empty)
             throw new MediaReferenceException("Posição de inserção inválida.");
-        var duration = MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);
+        // Accurate duration is available only for recognized uncompressed WAV files.
+        // Other formats retain their clearly marked placeholder durations.
+        var duration = asset.DurationTicks is long ticks
+            ? new MediaTime(ticks)
+            : MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);
         var start = asset.Kind == MediaKind.Video
             ? state.Clips.Where(c => c.Track == TimelineEngine.MainTrack)
                 .Select(c => c.End).DefaultIfEmpty(MediaTime.Zero).Max()
