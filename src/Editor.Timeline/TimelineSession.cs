@@ -55,6 +55,14 @@ public sealed class TimelineSession
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
     }
 
+    /// <summary>Forget an unused reference without deleting its source file.</summary>
+    public void RemoveUnusedMedia(Guid mediaId)
+    {
+        var next = MediaReferences.RemoveUnused(Media, Current, mediaId);
+        Execute(s => new CommandResult(
+            s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
     public TimelineState Undo()
     {
         if (!CanUndo) throw new TimelineException("NOTHING_TO_UNDO", "Undo stack is empty.");
