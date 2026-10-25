@@ -7,6 +7,7 @@
         <MenuItem Header="Abrir projeto..." Click="OpenProject_Click" InputGestureText="Ctrl+O"/>
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
+        <MenuItem Header="Relocalizar mídia selecionada..." Click="RelinkSelectedMedia_Click"/>
         <Separator/>
         <MenuItem Header="Salvar projeto" Click="SaveProject_Click" InputGestureText="Ctrl+S"/>
         <MenuItem Header="Salvar como..." Click="SaveAsProject_Click" InputGestureText="Ctrl+Shift+S"/>

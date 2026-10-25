@@ -50,6 +50,38 @@ public static class MediaReferences
         { return false; }
     }
 
+    /// <summary>
+    /// Explicit user-chosen replacement for a lost reference. Preserves the media ID.
+    /// This POC intentionally accepts only the same media kind; cross-kind
+    /// replacement needs effect-compatibility rules in the editing engine.
+    /// </summary>
+    public static IReadOnlyList<MediaAsset> Relink(
+        IReadOnlyList<MediaAsset> catalog, Guid mediaId, string chosenPath)
+    {
+        var index = -1;
+        for (var i = 0; i < catalog.Count; i++)
+        {
+            if (catalog[i].Id == mediaId) { index = i; break; }
+        }
+        if (index < 0)
+            throw new MediaReferenceException("A mídia selecionada não está vinculada ao projeto.");
+
+        var current = catalog[index];
+        var replacement = InspectFile(chosenPath);
+        if (replacement.Kind != current.Kind)
+            throw new MediaReferenceException(
+                "Selecione uma mídia do mesmo tipo (vídeo, áudio ou imagem).");
+
+        if (catalog.Any(m => m.Id != mediaId &&
+            SameSource(m.SourcePath, replacement.SourcePath)))
+            throw new MediaReferenceException(
+                "O arquivo não será adicionado pois já existe na biblioteca");
+
+        var updated = catalog.ToArray();
+        updated[index] = replacement with { Id = current.Id };
+        return updated;
+    }
+
     public static bool SameSource(string a, string b) =>
         string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
