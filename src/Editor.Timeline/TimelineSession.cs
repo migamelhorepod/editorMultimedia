@@ -55,6 +55,15 @@ public sealed class TimelineSession
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
     }
 
+    /// <summary>Refresh one imported file's measurements with a reversible edit.</summary>
+    public void RefreshMediaMetadata(Guid mediaId)
+    {
+        var next = MediaReferences.RefreshMetadata(Media, mediaId);
+        if (Media.SequenceEqual(next)) return;
+        Execute(s => new CommandResult(
+            s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
     /// <summary>Forget an unused reference without deleting its source file.</summary>
     public void RemoveUnusedMedia(Guid mediaId)
     {

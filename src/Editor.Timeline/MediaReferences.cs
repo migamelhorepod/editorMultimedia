@@ -86,6 +86,30 @@ public static class MediaReferences
     }
 
     /// <summary>
+    /// Re-read explicitly selected file metadata for an existing catalog entry.
+    /// The media ID and any existing timeline edits are left untouched.
+    /// </summary>
+    public static IReadOnlyList<MediaAsset> RefreshMetadata(
+        IReadOnlyList<MediaAsset> catalog, Guid mediaId)
+    {
+        var index = -1;
+        for (var i = 0; i < catalog.Count; i++)
+            if (catalog[i].Id == mediaId) { index = i; break; }
+        if (index < 0)
+            throw new MediaReferenceException("A mídia selecionada não está vinculada ao projeto.");
+
+        var previous = catalog[index];
+        if (!IsAvailable(previous))
+            throw new MediaReferenceException("A mídia está indisponível; relocalize-a antes de atualizar os dados.");
+        var current = InspectFile(previous.SourcePath) with { Id = previous.Id };
+        if (current.Kind != previous.Kind)
+            throw new MediaReferenceException("O tipo da mídia mudou e não pode ser atualizado.");
+        var updated = catalog.ToArray();
+        updated[index] = current;
+        return updated;
+    }
+
+    /// <summary>
     /// Remove a project catalog entry only when no clip refers to it.
     /// The physical file is never deleted.
     /// </summary>
