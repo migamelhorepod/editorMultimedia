@@ -229,7 +229,7 @@ public partial class MainWindow : Window
         var missing = availableMedia.Count(pair => !pair.Value);
         MessageBox.Show(this, missing == 0
             ? $"{mediaAssets.Count} mídias vinculadas; nenhuma indisponível nesta verificação."
-            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\\nOs arquivos poderão ser localizados novamente numa etapa posterior.",
+            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nOs arquivos poderão ser localizados novamente numa etapa posterior.",
             "Verificação de mídias", MessageBoxButton.OK,
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
@@ -275,13 +275,13 @@ public partial class MainWindow : Window
         UpdateDirty();
         Draw();
         var duplicateMessage = ignored > 0
-            ? "\\nO arquivo não será adicionado pois já existe na biblioteca" : "";
-        var issueText = errors.Count == 0 ? "" : "\\n\\nNão importados:\\n" +
-            string.Join("\\n", errors.Take(10));
+            ? "\nO arquivo não será adicionado pois já existe na biblioteca" : "";
+        var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
+            string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
             $"{added} arquivo(s) vinculado(s) à timeline com duração provisória (vídeo/áudio: 5s; imagem: 4s)." +
             duplicateMessage + issueText +
-            "\\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
+            "\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
@@ -446,9 +446,9 @@ public partial class MainWindow : Window
                 BorderThickness = new Thickness(clip.Id == selectedId || hasWarning ? 2 : 1),
                 Opacity = preview ? .72 : 1,
                 ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração provisória {clip.Duration.Seconds}s" +
-                    (linked is not null ? $"\\nArquivo vinculado: {linked.SourcePath}" : "\\nClipe de demonstração") +
-                    (missingMedia ? "\\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
-                    (clip.OrphanNotice ? "\\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
+                    (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
+                    (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
+                    (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
                 Child = content
             };
             rect.Tag = clip.Id;
