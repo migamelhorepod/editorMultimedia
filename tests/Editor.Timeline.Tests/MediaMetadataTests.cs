@@ -215,4 +215,60 @@ public sealed class MediaMetadataTests
         json["media"]![0]!["pixelWidth"] = -7;
         Assert.Throws<ProjectFileException>(() => ProjectStore.Deserialize(json.ToJsonString()));
     }
+
+    [Fact] public void ExistingCatalogEntryCanRefreshMeasurementsAndUndo()
+    {
+        using var temp = new TemporaryFiles();
+        var wave = MediaReferences.InspectFile(temp.Create("old.wav", BuildWave()));
+        var legacy = wave with { DurationTicks = null };
+        var timeline = new TimelineState(0,
+            [new Clip(Guid.NewGuid(), wave.Id, MediaKind.Audio, 1,
+                MediaTime.Zero, MediaTime.FromSeconds(5))]);
+        var session = new TimelineSession(timeline, [legacy]);
+
+        session.RefreshMediaMetadata(legacy.Id);
+        Assert.Equal(MediaTime.FromSeconds(1).Ticks,
+            Assert.Single(session.Media).DurationTicks);
+        Assert.Equal(MediaTime.FromSeconds(5), session.Current.Clips[0].Duration);
+        Assert.True(session.CanUndo);
+
+        session.Undo();
+        Assert.Null(Assert.Single(session.Media).DurationTicks);
+        Assert.Same(timeline, session.Current);
+
+        session.Redo();
+        Assert.Equal(MediaTime.FromSeconds(1).Ticks,
+            Assert.Single(session.Media).DurationTicks);
+    }
+
+    [Fact] public void RefreshingUnchangedMeasurementsCreatesNoHistoryEntry()
+    {
+        using var temp = new TemporaryFiles();
+        var measured = MediaReferences.InspectFile(temp.Create("one.wav", BuildWave()));
+        var session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()), [measured]);
+        session.RefreshMediaMetadata(measured.Id);
+        Assert.False(session.CanUndo);
+        Assert.Equal(measured, Assert.Single(session.Media));
+    }
+
+    [Fact] public void RefreshDoesNotReplaceMissingOriginalOrModifyTimeline()
+    {
+        using var temp = new TemporaryFiles();
+        var asset = MediaReferences.InspectFile(temp.Create("gone.wav", BuildWave()));
+        File.Delete(asset.SourcePath);
+        var initial = new TimelineState(0, Array.Empty<Clip>());
+        var session = new TimelineSession(initial, [asset]);
+        Assert.Throws<MediaReferenceException>(() => session.RefreshMediaMetadata(asset.Id));
+        Assert.Same(initial, session.Current);
+        Assert.Equal(asset, Assert.Single(session.Media));
+        Assert.False(session.CanUndo);
+    }
+
+    [Fact] public void RefreshUnknownAssetFailsWithoutUndoEntry()
+    {
+        var session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
+        Assert.Throws<MediaReferenceException>(() => session.RefreshMediaMetadata(Guid.NewGuid()));
+        Assert.False(session.CanUndo);
+    }
+
 }
