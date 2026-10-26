@@ -161,7 +161,7 @@ public sealed class MediaMetadataTests
         var timeline = new TimelineState(0, Array.Empty<Clip>());
         var project = new EditorProject(Guid.NewGuid(), "Format v3", timeline, [wave, png]);
         var json = ProjectStore.Serialize(project);
-        Assert.Contains("\"formatVersion\": 3", json);
+        Assert.Contains("\"formatVersion\": 4", json);
         var loaded = ProjectStore.Deserialize(json);
         Assert.True(ProjectStore.SameContent(project, loaded));
         Assert.Equal(MediaTime.FromSeconds(1).Ticks,
@@ -457,7 +457,7 @@ public sealed class MediaMetadataTests
         var project = new EditorProject(Guid.NewGuid(), "Video source",
             new TimelineState(0, Array.Empty<Clip>()), [source]);
         var json = JsonNode.Parse(ProjectStore.Serialize(project))!.AsObject();
-        Assert.Equal(3, (int)json["formatVersion"]!);
+        Assert.Equal(4, (int)json["formatVersion"]!);
         Assert.Equal(source.DurationTicks, (long)json["media"]![0]!["durationTicks"]!);
         var loaded = ProjectStore.Deserialize(json.ToJsonString());
         Assert.Equal(source, Assert.Single(loaded.MediaItems));

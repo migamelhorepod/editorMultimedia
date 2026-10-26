@@ -129,13 +129,13 @@ public sealed class ProjectStoreTests
 
     [Fact] public void FutureSchemaVersionIsRejected()
     {
-        var json = ProjectStore.Serialize(Sample()).Replace("\"formatVersion\": 3", "\"formatVersion\": 4");
-        Assert.Contains("Formato 4", Assert.Throws<ProjectFileException>(() => ProjectStore.Deserialize(json)).Message);
+        var json = ProjectStore.Serialize(Sample()).Replace("\"formatVersion\": 4", "\"formatVersion\": 5");
+        Assert.Contains("Formato 5", Assert.Throws<ProjectFileException>(() => ProjectStore.Deserialize(json)).Message);
     }
 
     [Fact] public void UnknownPropertiesAreRejected()
     {
-        var json = ProjectStore.Serialize(Sample()).Replace("\"formatVersion\": 3,", "\"formatVersion\": 3, \"unexpected\": true,");
+        var json = ProjectStore.Serialize(Sample()).Replace("\"formatVersion\": 4,", "\"formatVersion\": 4, \"unexpected\": true,");
         Assert.Throws<ProjectFileException>(() => ProjectStore.Deserialize(json));
     }
 

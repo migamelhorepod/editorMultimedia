@@ -113,7 +113,7 @@ public sealed class MediaReferencesTests
         state = TimelineEngine.Insert(state, state.Version, clip).State;
         var project = new EditorProject(Guid.NewGuid(), "Importado", state, [asset]);
         var json = ProjectStore.Serialize(project);
-        Assert.Contains("\"formatVersion\": 3", json);
+        Assert.Contains("\"formatVersion\": 4", json);
         var loaded = ProjectStore.Deserialize(json);
         Assert.Equal(asset, Assert.Single(loaded.MediaItems));
         Assert.True(ProjectStore.SameContent(project, loaded));
