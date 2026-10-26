@@ -213,7 +213,7 @@ public static partial class TimelineEngine
         var delta = requestedLeftEdge - current.Start;
         var result = ResizeMain(state, version, id, current.End - requestedLeftEdge);
         var clips = result.State.Clips.Select(c => c.Id == id
-            ? c with { SourceStart = current.SourceStart + delta }
+            ? c with { SourceStart = current.Kind == MediaKind.Image ? current.SourceStart : current.SourceStart + delta }
             : c).ToArray();
         var updated = result.State with { Clips = clips };
         Validate(updated);
@@ -236,7 +236,8 @@ public static partial class TimelineEngine
         var candidate = original with
         {
             Start = start, Duration = original.End - start,
-            SourceStart = original.SourceStart + (start - original.Start)
+            SourceStart = original.Kind == MediaKind.Image ? original.SourceStart :
+                original.SourceStart + (start - original.Start)
         };
         if (candidate.Association == AssociationKind.Positioned)
         {
@@ -379,7 +380,8 @@ public static partial class TimelineEngine
         var right = original with
         {
             Id = rightId, Start = at, Duration = original.End - at,
-            SourceStart = original.SourceStart + leftDuration
+            SourceStart = original.Kind == MediaKind.Image ? original.SourceStart :
+                original.SourceStart + leftDuration
         };
         if (original.Association == AssociationKind.Positioned)
             right = right with { ParentOffset = original.ParentOffset + leftDuration };
