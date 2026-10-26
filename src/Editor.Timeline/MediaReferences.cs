@@ -7,7 +7,7 @@ public sealed record MediaAsset(Guid Id, MediaKind Kind, string DisplayName, str
 public sealed class MediaReferenceException(string message) : Exception(message);
 
 /// <summary>Initial POC catalog, not the future IFileAccessService.
-/// Only bounded WAV PCM/float and PNG header metadata are inspected; no decoding.</summary>
+/// Bounded MP4/MOV movie duration, WAV PCM/float, and PNG header inspection; no decoding.</summary>
 public static class MediaReferences
 {
     private static readonly Dictionary<string, MediaKind> Supported = new(StringComparer.OrdinalIgnoreCase)
@@ -142,7 +142,8 @@ public static class MediaReferences
                 !TryDetectKind(asset.SourcePath, out var kind) || kind != asset.Kind ||
                 Path.GetFileName(asset.SourcePath) != asset.DisplayName ||
                 (asset.DurationTicks is long duration &&
-                    (asset.Kind != MediaKind.Audio || duration <= 0 || duration > TimeSpan.FromDays(7).Ticks)) ||
+                    (asset.Kind is not (MediaKind.Audio or MediaKind.Video) ||
+                        duration <= 0 || duration > TimeSpan.FromDays(7).Ticks)) ||
                 (asset.PixelWidth.HasValue != asset.PixelHeight.HasValue) ||
                 (asset.PixelWidth.HasValue && (asset.Kind != MediaKind.Image ||
                     asset.PixelWidth.Value is <= 0 or > 100000 ||
@@ -163,8 +164,12 @@ public static class MediaReferences
         TimelineEngine.Validate(state);
         if (playhead.Ticks < 0 || clipId == Guid.Empty)
             throw new MediaReferenceException("Posição de inserção inválida.");
-        // Accurate duration is available only for recognized uncompressed WAV files.
-        // Other formats retain their clearly marked placeholder durations.
+        // Videos must enter the main track at their real source duration.
+        // Refuse unknown video duration instead of silently truncating to 5s.
+        if (asset.Kind == MediaKind.Video && asset.DurationTicks is null)
+            throw new MediaReferenceException(
+                "Não foi possível determinar a duração do vídeo. " +
+                "Esta versão mede MP4/MOV compatíveis; o vídeo não foi inserido nem cortado.");
         var duration = asset.DurationTicks is long ticks
             ? new MediaTime(ticks)
             : MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);

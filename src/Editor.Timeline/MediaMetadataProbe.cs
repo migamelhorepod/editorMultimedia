@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace Editor.Timeline;
 
-/// <summary>Metadata read from bounded headers, not from decoding audiovisual content.</summary>
+/// <summary>Metadata read from bounded container/header structures, without decoding media.</summary>
 public sealed record MediaMetadata(long? DurationTicks = null,
     int? PixelWidth = null, int? PixelHeight = null);
 
@@ -18,15 +18,20 @@ public static class MediaMetadataProbe
         // but no real metadata is claimed for it.
         try
         {
-            if (kind != MediaKind.Audio && kind != MediaKind.Image)
+            if (kind is not (MediaKind.Audio or MediaKind.Image or MediaKind.Video))
                 return new MediaMetadata();
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
+            var extension = Path.GetExtension(path);
             return kind switch
             {
-                MediaKind.Audio when Path.GetExtension(path).Equals(".wav",
+                MediaKind.Audio when extension.Equals(".wav",
                     StringComparison.OrdinalIgnoreCase) => ReadWave(file),
-                MediaKind.Image when Path.GetExtension(path).Equals(".png",
+                MediaKind.Video when extension.Equals(".mp4",
+                    StringComparison.OrdinalIgnoreCase) => ReadIsoMovie(file, requireFtyp: true),
+                MediaKind.Video when extension.Equals(".mov",
+                    StringComparison.OrdinalIgnoreCase) => ReadIsoMovie(file, requireFtyp: false),
+                MediaKind.Image when extension.Equals(".png",
                     StringComparison.OrdinalIgnoreCase) => ReadPng(file),
                 _ => new MediaMetadata()
             };
@@ -123,6 +128,122 @@ public static class MediaMetadataProbe
         if (ticks is <= 0 || ticks > TimeSpan.FromDays(7).Ticks)
             return new MediaMetadata();
         return new MediaMetadata(DurationTicks: ticks);
+    }
+
+    // ISO BMFF / QuickTime: parse top-level boxes and the moov/mvhd movie duration.
+    // The potentially very large mdat box is skipped with Seek, never read or copied.
+    // Some fragmented/malformed/unsupported files have no valid movie duration:
+    // for them we report unknown instead of silently pretending the video lasts 5s.
+    private const int MaxIsoTopLevelBoxes = 1024;
+    private const int MaxIsoMovieBoxes = 2048;
+    private const long MaxMoovHeaderScan = 16L * 1024 * 1024;
+    private static readonly long MaxMeasuredDurationTicks = TimeSpan.FromDays(7).Ticks;
+
+    private static MediaMetadata ReadIsoMovie(Stream file, bool requireFtyp)
+    {
+        var fileEnd = file.Length;
+        var foundFtyp = false;
+        for (var index = 0; index < MaxIsoTopLevelBoxes && file.Position < fileEnd; index++)
+        {
+            if (!TryReadIsoBox(file, fileEnd, out var boxType, out var boxEnd,
+                out var payloadLength)) return new MediaMetadata();
+            if (boxType == IsoType("ftyp"u8) && payloadLength >= 8)
+                foundFtyp = true;
+            else if (boxType == IsoType("moov"u8))
+            {
+                if (requireFtyp && !foundFtyp) return new MediaMetadata();
+                return ReadMovieHeader(file, boxEnd);
+            }
+
+            // Skip the entire data payload, including gigabyte-sized mdat.
+            file.Position = boxEnd;
+        }
+        return new MediaMetadata();
+    }
+
+    private static MediaMetadata ReadMovieHeader(Stream file, long moovEnd)
+    {
+        var start = file.Position;
+        for (var i = 0; i < MaxIsoMovieBoxes &&
+            file.Position < moovEnd && file.Position - start <= MaxMoovHeaderScan; i++)
+        {
+            if (!TryReadIsoBox(file, moovEnd, out var kind, out var end,
+                out var payloadLength)) return new MediaMetadata();
+
+            if (kind == IsoType("mvhd"u8))
+                return ReadMovieDuration(file, payloadLength);
+
+            // Track metadata may be large; skip it rather than inspecting codec data.
+            file.Position = end;
+        }
+        return new MediaMetadata();
+    }
+
+    private static MediaMetadata ReadMovieDuration(Stream file, long payloadLength)
+    {
+        // mvhd v0: flags(4), created(4), modified(4), timescale(4), duration(4).
+        // mvhd v1: flags(4), created(8), modified(8), timescale(4), duration(8).
+        Span<byte> head = stackalloc byte[32];
+        if (payloadLength < 4 || !ReadExactly(file, head[..4]))
+            return new MediaMetadata();
+        var version = head[0];
+        var expectedLength = version switch { 0 => 20, 1 => 32, _ => 0 };
+        if (expectedLength == 0 || payloadLength < expectedLength ||
+            !ReadExactly(file, head.Slice(4, expectedLength - 4)))
+            return new MediaMetadata();
+
+        var timescale = version == 0
+            ? BinaryPrimitives.ReadUInt32BigEndian(head[12..16])
+            : BinaryPrimitives.ReadUInt32BigEndian(head[20..24]);
+        var duration = version == 0
+            ? (ulong)BinaryPrimitives.ReadUInt32BigEndian(head[16..20])
+            : BinaryPrimitives.ReadUInt64BigEndian(head[24..32]);
+        if (timescale == 0 || duration == 0 ||
+            (version == 0 && duration == uint.MaxValue) ||
+            (version == 1 && duration == ulong.MaxValue))
+            return new MediaMetadata();
+
+        // Decimal preserves the 100ns project clock and prevents integer overflow.
+        var ticks = (decimal)duration * TimeSpan.TicksPerSecond / timescale;
+        if (ticks <= 0 || ticks > MaxMeasuredDurationTicks) return new MediaMetadata();
+        return new MediaMetadata(DurationTicks: (long)decimal.Round(ticks,
+            0, MidpointRounding.AwayFromZero));
+    }
+
+    private static uint IsoType(ReadOnlySpan<byte> fourCc) =>
+        BinaryPrimitives.ReadUInt32BigEndian(fourCc);
+
+    private static bool TryReadIsoBox(Stream file, long parentEnd, out uint boxType,
+        out long boxEnd, out long payloadLength)
+    {
+        boxType = 0;
+        boxEnd = 0;
+        payloadLength = 0;
+        var beginning = file.Position;
+        if (parentEnd - beginning < 8) return false;
+
+        Span<byte> header = stackalloc byte[16];
+        if (!ReadExactly(file, header[..8])) return false;
+        var shortSize = BinaryPrimitives.ReadUInt32BigEndian(header[..4]);
+        boxType = BinaryPrimitives.ReadUInt32BigEndian(header[4..8]);
+
+        ulong totalLength = shortSize;
+        ulong headerLength = 8;
+        if (shortSize == 1)
+        {
+            if (parentEnd - beginning < 16 || !ReadExactly(file, header[8..16]))
+                return false;
+            totalLength = BinaryPrimitives.ReadUInt64BigEndian(header[8..16]);
+            headerLength = 16;
+        }
+        else if (shortSize == 0)
+            totalLength = (ulong)(parentEnd - beginning);
+
+        if (totalLength < headerLength || totalLength > (ulong)(parentEnd - beginning))
+            return false;
+        boxEnd = beginning + (long)totalLength;
+        payloadLength = (long)(totalLength - headerLength);
+        return true;
     }
 
     private static bool ReadExactly(Stream file, Span<byte> data)
