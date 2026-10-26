@@ -502,11 +502,9 @@ public partial class MainWindow : Window
             IOException or UnauthorizedAccessException or ArgumentException or
             NotSupportedException or OverflowException)
         {
-            MessageBox.Show(this, ex is TimelineException { Code: "NO_FREE_TRACK" }
-                ? "Não é possível criar mais trilhas\n\nConsidere realocar a mídia em uma trilha já existente"
-                : ex.Message,
-                "Não foi possível restaurar a duração original",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            // Context-menu timeline actions do not interrupt the editor with
+            // dialogs. Failure is atomic; keep the source and current edits.
+            System.Diagnostics.Debug.WriteLine($"Restaurar duração original: {ex}");
         }
     }
 
@@ -747,15 +745,15 @@ public partial class MainWindow : Window
         Status.Text = $"Projeto: {projectName}{(hasUnsavedChanges ? " (não salvo)" : "")} | Cursor {Timecode.Format(MediaTime.FromSeconds((decimal)playheadSeconds))} | Versão {session.Current.Version} | {session.Current.Clips.Count} clipes | Duração {Timecode.Format(session.Current.Duration)} | " +
             (selected is not null ? Describe(selected) : "Selecione um clipe e arraste para mover.") +
             (resizingClip && hasDragPreview ? previewError is not null
-                ? $" | Prévia de redimensionamento indisponível: {previewError}"
+                ? ""
                 : $" | Prévia: início {Timecode.Format(displayedResize?.Start ?? resizePreviewStart)}, duração {Timecode.Format(displayedResize?.Duration ?? resizePreviewDuration)}" +
                   (resolvedPreviewTrack is int newTrack && newTrack != originalTrack
                       ? $" | Realocação: Trilha {newTrack + 1}" : "") : "") +
             (draggingMain && hasDragPreview ? previewError is not null
-                ? $" | Prévia indisponível: {previewError}"
+                ? ""
                 : $" | Nova posição principal: {previewMainIndex + 1}" : "") +
             (!draggingMain && hasDragPreview ? previewError == "NO_FREE_TRACK"
-                ? " | Sem trilha secundária disponível"
+                ? ""
                 : resolvedPreviewTrack is int lane && lane != dragPreviewTrack
                     ? $" | Realocação automática: Trilha {lane + 1}" : "" : "") +
             $" | Arquivos vinculados: {mediaAssets.Count} (indisponíveis: {availableMedia.Count(p => !p.Value)})" +
@@ -913,12 +911,7 @@ public partial class MainWindow : Window
     {
         var clip = Selected();
         if (clip is null) return;
-        if (clip.Track == TimelineEngine.MainTrack)
-        {
-            MessageBox.Show(this, "Selecione uma mídia de uma trilha secundária para duplicar.",
-                "Duplicação indisponível", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
+        if (clip.Track == TimelineEngine.MainTrack) return;
         var newId = Guid.NewGuid();
         Run(s => TimelineEngine.DuplicateSecondary(s, s.Version, clip.Id, newId));
         if (session.Current.Clips.Any(c => c.Id == newId)) selectedId = newId;
@@ -931,11 +924,7 @@ public partial class MainWindow : Window
         if (clip is null) return;
         var at = MediaTime.FromSeconds((decimal)playheadSeconds);
         if (at.Ticks <= clip.Start.Ticks || at.Ticks >= clip.End.Ticks)
-        {
-            MessageBox.Show(this, "Posicione o cursor dentro do clipe selecionado para dividir.",
-                "Divisão indisponível", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
-        }
         Run(state => TimelineEngine.Split(state, state.Version, clip.Id, at, Guid.NewGuid()));
     }
 
@@ -1059,15 +1048,25 @@ public partial class MainWindow : Window
                     : Math.Max(0.0, originalSeconds - Seconds(clip.SourceStart));
                 var newStart = Math.Clamp(snapped, earliest,
                     originalSeconds + Seconds(originalResizeDuration) - .1);
-                resizePreviewStart = MediaTime.FromSeconds((decimal)Math.Round(newStart, 1));
-                resizePreviewDuration = MediaTime.FromSeconds((decimal)Math.Round(
-                    originalSeconds + Seconds(originalResizeDuration) - newStart, 1));
+                // Clamp first, then preserve exact source-time precision. A
+                // second 0.1-second rounding could cross the measured boundary.
+                resizePreviewStart = MediaTime.FromSeconds((decimal)newStart);
+                resizePreviewDuration = clip.End - resizePreviewStart;
             }
             else
             {
-                // A 100ms lower bound avoids zero and negative media durations.
-                var seconds = Math.Max(.1, Math.Round((snapped - originalSeconds) * 10,
-                    MidpointRounding.AwayFromZero) / 10);
+                // The handle visibly stops at the *actual* last instant of
+                // audio/video rather than showing an invalid preview or popup.
+                var wanted = Math.Round((snapped - originalSeconds) * 10,
+                    MidpointRounding.AwayFromZero) / 10;
+                var source = session.Media.FirstOrDefault(m => m.Id == clip.MediaId);
+                var remainingSeconds = source?.DurationTicks is long fullTicks &&
+                    clip.Kind is (MediaKind.Audio or MediaKind.Video)
+                    ? Math.Max(0, (fullTicks - clip.SourceStart.Ticks) /
+                        (double)TimeSpan.TicksPerSecond)
+                    : double.PositiveInfinity;
+                var smallest = Math.Min(.1, remainingSeconds);
+                var seconds = Math.Clamp(wanted, smallest, remainingSeconds);
                 resizePreviewStart = originalResizeStart;
                 resizePreviewDuration = MediaTime.FromSeconds((decimal)seconds);
             }
@@ -1352,7 +1351,6 @@ public partial class MainWindow : Window
         var main = draggingMain;
         var target = previewMainIndex;
         var valid = previewError is null;
-        var resizeFailure = previewError;
         var seconds = dragPreviewSeconds;
         var track = dragPreviewTrack;
         draggingId = null;
@@ -1364,16 +1362,7 @@ public partial class MainWindow : Window
         previewError = null;
         resolvedPreviewTrack = null;
         Surface.ReleaseMouseCapture();
-        if (commit && resize && resizeFailure == "SOURCE_BOUNDS")
-        {
-            MessageBox.Show(this,
-                "O trecho solicitado ultrapassa a duração original do áudio ou vídeo.\n\n" +
-                "Você pode alongar novamente trechos cortados, mas não pode ultrapassar " +
-                "o início nem o fim do arquivo de origem.",
-                "Limite da mídia original",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        else if (commit && id is Guid clipId)
+        if (commit && id is Guid clipId)
         {
             if (resize && valid && (leftEdge
                 ? finalResizeStart != originalResizeStart
@@ -1482,21 +1471,12 @@ public partial class MainWindow : Window
     private void Run(Func<TimelineState, CommandResult> operation)
     {
         try { session.Execute(operation); UpdateDirty(); }
-        catch (MediaReferenceException ex)
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or OverflowException)
         {
-            MessageBox.Show(this, ex.Message, "Trecho fora da fonte",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            // Timeline editing is non-interrupting: invalid operations are
+            // rejected atomically, without dialog boxes or undo entries.
+            System.Diagnostics.Debug.WriteLine($"Edição não aplicada: {ex}");
         }
-        catch (TimelineException ex)
-        {
-            // Uma colisão só gera aviso quando nenhuma das dez trilhas comporta a mídia.
-            var noAvailableTrack = ex.Code == "NO_FREE_TRACK";
-            var message = noAvailableTrack
-                ? "Não é possível criar mais trilhas\n\nConsidere realocar a mídia em uma trilha já existente"
-                : $"{ex.Code}: {ex.Message}";
-            MessageBox.Show(this, message, "Operação não permitida", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        catch (OverflowException) { MessageBox.Show(this, "Tempo excedeu o intervalo permitido.", "Erro", MessageBoxButton.OK, MessageBoxImage.Warning); }
         Draw();
     }
     private Clip? Selected() => selectedId is Guid id ? session.Current.Clips.FirstOrDefault(c => c.Id == id) : null;
