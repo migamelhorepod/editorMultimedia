@@ -209,7 +209,6 @@ public static partial class TimelineEngine
             throw new TimelineException("INVALID_RESIZE", "Left trim must preserve a positive duration.");
         if (requestedLeftEdge == current.Start)
             return Commit(state, state.Clips.ToList());
-        BlockTemporalStretch(current, current.End - requestedLeftEdge);
 
         // ReflowMain keeps every preceding clip unchanged and repositions only
         // the selected clip's right edge, subsequent clips and their children.
@@ -236,7 +235,6 @@ public static partial class TimelineEngine
         if (original.Track == MainTrack || start.Ticks < 0 || start.Ticks >= original.End.Ticks)
             throw new TimelineException("INVALID_RESIZE", "Secondary left trim requires a valid start before the end.");
         if (start == original.Start) return Commit(state, state.Clips.ToList());
-        BlockTemporalStretch(original, original.End - start);
         var candidate = original with
         {
             Start = start, Duration = original.End - start,
@@ -278,39 +276,24 @@ public static partial class TimelineEngine
     }
 
     /// <summary>
-    /// Audio/video clips can only be shortened through normal timeline resizing.
-    /// Restoring a complete source is a distinct explicit user action.
-    /// Images remain freely resizable.
+    /// Resize an occurrence on the primary timeline. For media-backed clips,
+    /// TimelineSession verifies that source start + duration does not exceed
+    /// the measured original source (including when re-extending a cut).
     /// </summary>
-    private static void BlockTemporalStretch(Clip clip, MediaTime nextDuration)
-    {
-        if (clip.Kind is (MediaKind.Audio or MediaKind.Video) &&
-            nextDuration.Ticks > clip.Duration.Ticks)
-            throw new TimelineException("TEMPORAL_STRETCH",
-                "Áudios e vídeos não podem ser esticados na timeline. " +
-                "Use 'Restaurar duração original' para recuperar o arquivo completo.");
-    }
-
-    /// <summary>Manual change in main duration; following main clips ripple.</summary>
     public static CommandResult ResizeMain(TimelineState state, long version, Guid id, MediaTime duration)
-        => ResizeMainCore(state, version, id, duration, allowSourceRestore: false);
-
-    /// <summary>Only for the explicit restoration of full measured source duration.</summary>
-    public static CommandResult RestoreMainDuration(TimelineState state, long version, Guid id, MediaTime duration)
-        => ResizeMainCore(state, version, id, duration, allowSourceRestore: true);
-
-    private static CommandResult ResizeMainCore(TimelineState state, long version, Guid id,
-        MediaTime duration, bool allowSourceRestore)
     {
         Check(state, version);
         if (duration.Ticks <= 0) throw new TimelineException("INVALID_DURATION", "Duration must be positive.");
         var mains = state.Clips.Where(c => c.Track == MainTrack).OrderBy(c => c.Start.Ticks).ToList();
         var index = mains.FindIndex(c => c.Id == id);
         if (index < 0) throw new TimelineException("NOT_MAIN", "Clip is not on main track.");
-        if (!allowSourceRestore) BlockTemporalStretch(mains[index], duration);
         mains[index] = mains[index] with { Duration = duration };
         return ReflowMain(state, mains);
     }
+
+    /// <summary>Used for explicit recovery; source range is reset by TimelineSession.</summary>
+    public static CommandResult RestoreMainDuration(TimelineState state, long version, Guid id, MediaTime duration)
+        => ResizeMain(state, version, id, duration);
 
     private static CommandResult ReflowMain(TimelineState state, List<Clip> orderedMains)
     {
@@ -369,22 +352,16 @@ public static partial class TimelineEngine
         return new CommandResult(result.State, changed);
     }
 
-    /// <summary>Manual resizing of secondaries; audio/video never stretch.</summary>
+    /// <summary>
+    /// Change the secondary duration. Source bounds are checked by the session
+    /// when real source metadata is attached; images remain freely resizable.
+    /// </summary>
     public static CommandResult ResizeSecondary(TimelineState state, long version, Guid id, MediaTime duration)
-        => ResizeSecondaryCore(state, version, id, duration, allowSourceRestore: false);
-
-    /// <summary>Only for the explicit restoration of full measured source duration.</summary>
-    public static CommandResult RestoreSecondaryDuration(TimelineState state, long version, Guid id, MediaTime duration)
-        => ResizeSecondaryCore(state, version, id, duration, allowSourceRestore: true);
-
-    private static CommandResult ResizeSecondaryCore(TimelineState state, long version, Guid id,
-        MediaTime duration, bool allowSourceRestore)
     {
         Check(state, version);
         var c = state.Find(id);
         if (c.Track == MainTrack || duration.Ticks <= 0)
             throw new TimelineException("INVALID_RESIZE", "Secondary clip and positive duration required.");
-        if (!allowSourceRestore) BlockTemporalStretch(c, duration);
         var candidate = c with { Duration = duration };
         bool Fits(int track) => state.Clips.Where(other => other.Id != id && other.Track == track)
             .All(other => candidate.End.Ticks <= other.Start.Ticks || candidate.Start.Ticks >= other.End.Ticks);
@@ -396,6 +373,10 @@ public static partial class TimelineEngine
         }
         return Commit(state, state.Clips.Select(x => x.Id == id ? candidate : x).ToList());
     }
+
+    /// <summary>Explicit recovery uses the same collision-safe timeline operation.</summary>
+    public static CommandResult RestoreSecondaryDuration(TimelineState state, long version, Guid id, MediaTime duration)
+        => ResizeSecondary(state, version, id, duration);
 
     /// <summary>Split a clip at an absolute time, retaining the original ID for the left half.
     /// The right half receives a new ID and inherits the same media and compatible metadata.

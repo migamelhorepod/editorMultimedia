@@ -33,7 +33,7 @@ public partial class MainWindow : Window
     private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
     {
         public string Name => Asset.DisplayName;
-        public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
+        public string Details => $"{Asset.Kind} · {Usages} ocorrência(s) na timeline" +
             (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
             (Asset.DurationTicks is long ticks
                 ? $" · {Timecode.Format(new MediaTime(ticks))} (duração original)"
@@ -364,6 +364,12 @@ public partial class MainWindow : Window
         RelinkMediaButton.IsEnabled = hasSelected;
         RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
         RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
+        RemoveMediaButton.ToolTip = !hasSelected
+            ? "Selecione uma mídia no catálogo do projeto."
+            : uses == 0
+                ? "Remove somente a referência do catálogo. O arquivo original não é apagado."
+                : $"Não é possível remover: {uses} clipe(s) na timeline ainda usam esta mídia. " +
+                  "Excluir esses clipes é permitido; remover a referência do catálogo não.";
         var selectedClip = Selected();
         FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
             mediaAssets.Any(m => m.Id == selectedClip.MediaId);
@@ -996,8 +1002,10 @@ public partial class MainWindow : Window
         // Right-click opens the clip menu. Left-click only selects or starts a drag.
         // Mark handled so the Canvas does not treat this gesture as another action.
         selectedId = id;
-        Draw();
-        ShowClipMenu(id);
+        // Keep the clicked visual alive until the popup closes. Rebuilding the
+        // Canvas here previously detached the Border under the mouse before
+        // the context menu could be displayed reliably.
+        ShowClipMenu(id, b);
         e.Handled = true;
     }
 
@@ -1064,6 +1072,10 @@ public partial class MainWindow : Window
                             clip.Id, resizePreviewDuration)
                         : TimelineEngine.PreviewResizeSecondary(session.Current, session.Current.Version,
                             clip.Id, resizePreviewDuration);
+                // Preview the same source-bound validation as the actual commit:
+                // invalid over-extensions must not appear to be valid while dragging.
+                MediaReferences.ValidateCatalog(session.Media,
+                    MediaReferences.VerifyEditedRanges(session.Current, preview.State, session.Media));
                 previewState = preview.State;
                 resolvedPreviewTrack = preview.State.Find(clip.Id).Track;
                 previewError = null;
@@ -1073,6 +1085,12 @@ public partial class MainWindow : Window
                 previewState = null;
                 resolvedPreviewTrack = null;
                 previewError = ex.Code;
+            }
+            catch (MediaReferenceException)
+            {
+                previewState = null;
+                resolvedPreviewTrack = null;
+                previewError = "SOURCE_BOUNDS";
             }
             catch (OverflowException)
             {
@@ -1330,13 +1348,13 @@ public partial class MainWindow : Window
         previewError = null;
         resolvedPreviewTrack = null;
         Surface.ReleaseMouseCapture();
-        if (commit && resize && resizeFailure == "TEMPORAL_STRETCH")
+        if (commit && resize && resizeFailure == "SOURCE_BOUNDS")
         {
             MessageBox.Show(this,
-                "Áudios e vídeos só podem ser cortados ou encurtados na timeline.\n\n" +
-                "Para recuperar a duração completa, clique com o botão direito no clipe " +
-                "e selecione 'Restaurar duração original'.",
-                "Não é possível esticar a mídia",
+                "O trecho solicitado ultrapassa a duração original do áudio ou vídeo.\n\n" +
+                "Você pode alongar novamente trechos cortados, mas não pode ultrapassar " +
+                "o início nem o fim do arquivo de origem.",
+                "Limite da mídia original",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
         else if (commit && id is Guid clipId)
@@ -1363,28 +1381,30 @@ public partial class MainWindow : Window
         Draw();
     }
 
-    private void ShowClipMenu(Guid clipId)
+    private void ShowClipMenu(Guid clipId, Border clickedClip)
     {
         var clip = session.Current.Clips.FirstOrDefault(c => c.Id == clipId);
         if (clip is null) return;
         selectedId = clipId;
-        var menu = new ContextMenu { PlacementTarget = Surface,
+        var menu = new ContextMenu { PlacementTarget = clickedClip,
             Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        menu.Closed += (_, _) => Draw();
         var duplicate = MakeClipMenuItem("Duplicar", "copy", Duplicate_Click);
         duplicate.IsEnabled = clip.Track != TimelineEngine.MainTrack;
         menu.Items.Add(duplicate);
-        menu.Items.Add(MakeClipMenuItem("Excluir", "trash", Delete_Click));
+        menu.Items.Add(MakeClipMenuItem("Excluir este clipe da timeline", "trash", Delete_Click));
         var independent = MakeClipMenuItem("Tornar independente", "unlink", Independent_Click);
         independent.IsEnabled = clip.Track != TimelineEngine.MainTrack && clip.Association == AssociationKind.Positioned;
         menu.Items.Add(independent);
         var relink = MakeClipMenuItem("Relocalizar mídia...", "folder", RelinkSelectedMedia_Click);
         relink.IsEnabled = mediaAssets.Any(m => m.Id == clip.MediaId);
         menu.Items.Add(new Separator());
-        menu.Items.Add(relink);
-        var restore = MakeClipMenuItem("Restaurar duração original", "clock", FitSelectedClip_Click);
+        var restore = MakeClipMenuItem("Restaurar duração original do clipe", "clock", FitSelectedClip_Click);
         restore.IsEnabled = clip.Kind is MediaKind.Video or MediaKind.Audio &&
             mediaAssets.Any(m => m.Id == clip.MediaId);
+        restore.ToolTip = "Recupera todo o áudio/vídeo original e zera os cortes; Ctrl+Z pode desfazer.";
         menu.Items.Add(restore);
+        menu.Items.Add(relink);
         menu.IsOpen = true;
     }
 
