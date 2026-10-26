@@ -196,6 +196,21 @@ public sealed class SecurityFoundationTests
     }
 
     [Fact]
+    public async Task WindowsPipeDeniesClientWhenKernelPidDoesNotMatchExpectedWorker()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var registry = new AccessGrantRegistry(Guid.NewGuid());
+        var pipe = new WindowsWorkerPipe(registry);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // Connect from this process while the controller expects a different PID.
+        var server = pipe.ServeOnceAsync(Environment.ProcessId + 1, timeout.Token);
+        var client = WindowsWorkerPipe.ConnectOnceAsync(
+            pipe.PipeName, WorkerRequest.Heartbeat(), timeout.Token);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () => await server);
+        await Assert.ThrowsAnyAsync<IOException>(async () => await client);
+    }
+
+    [Fact]
     public async Task WindowsPipeRejectsUnauthorizedResourcesWithoutOpeningFiles()
     {
         if (!OperatingSystem.IsWindows()) return;
