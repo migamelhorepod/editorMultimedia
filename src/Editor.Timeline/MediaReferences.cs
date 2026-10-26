@@ -153,8 +153,19 @@ public static class MediaReferences
         foreach (var clip in timeline.Clips)
         {
             var media = catalog.FirstOrDefault(m => m.Id == clip.MediaId);
-            if (media is not null && media.Kind != clip.Kind)
+            if (media is null) continue; // Historical demonstration clip without a physical source.
+            if (media.Kind != clip.Kind)
                 throw new MediaReferenceException("O tipo de mídia do clipe não corresponde ao arquivo registrado.");
+            if (clip.SourceStart.Ticks < 0)
+                throw new MediaReferenceException("O corte começa antes do início do arquivo original.");
+            if (clip.Kind == MediaKind.Image)
+            {
+                if (clip.SourceStart != MediaTime.Zero)
+                    throw new MediaReferenceException("Imagens não podem ter deslocamento temporal de origem.");
+            }
+            else if (media.DurationTicks is long fullLength &&
+                     ((decimal)clip.SourceStart.Ticks + clip.Duration.Ticks > fullLength))
+                throw new MediaReferenceException("O clipe ultrapassa a duração do arquivo original.");
         }
     }
 
@@ -166,10 +177,10 @@ public static class MediaReferences
             throw new MediaReferenceException("Posição de inserção inválida.");
         // Videos must enter the main track at their real source duration.
         // Refuse unknown video duration instead of silently truncating to 5s.
-        if (asset.Kind == MediaKind.Video && asset.DurationTicks is null)
+        if (asset.Kind is MediaKind.Video or MediaKind.Audio && asset.DurationTicks is null)
             throw new MediaReferenceException(
-                "Não foi possível determinar a duração do vídeo. " +
-                "Esta versão mede MP4/MOV compatíveis; o vídeo não foi inserido nem cortado.");
+                "Não foi possível determinar a duração real da mídia temporal. " +
+                "Instale ou configure ffprobe para analisar formatos comprimidos; nenhum clipe foi inserido.");
         var duration = asset.DurationTicks is long ticks
             ? new MediaTime(ticks)
             : MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);

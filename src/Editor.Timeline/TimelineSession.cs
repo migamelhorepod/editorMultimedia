@@ -90,10 +90,17 @@ public sealed class TimelineSession
             return;
 
         var desired = new MediaTime(ticks);
-        Execute(state => clip.Track == TimelineEngine.MainTrack
-            ? TimelineEngine.ResizeMain(state, state.Version, clip.Id, desired)
-            : TimelineEngine.ResizeSecondary(state, state.Version, clip.Id, desired),
-            refreshed);
+        Execute(state =>
+        {
+            var adjusted = clip.Track == TimelineEngine.MainTrack
+                ? TimelineEngine.ResizeMain(state, state.Version, clip.Id, desired)
+                : TimelineEngine.ResizeSecondary(state, state.Version, clip.Id, desired);
+            var clips = adjusted.State.Clips.Select(c => c.Id == clip.Id
+                ? c with { SourceStart = MediaTime.Zero } : c).ToArray();
+            var next = adjusted.State with { Clips = clips };
+            TimelineEngine.Validate(next);
+            return adjusted with { State = next };
+        }, refreshed);
     }
 
     /// <summary>Forget an unused reference without deleting its source file.</summary>

@@ -21,7 +21,7 @@ public sealed class ProjectFileException(string message, Exception? inner = null
 /// </summary>
 public static class ProjectStore
 {
-    public const int FormatVersion = 3;
+    public const int FormatVersion = 4;
     public const int MaxFileBytes = 16 * 1024 * 1024;
     private const int MaxClips = 50_000;
     private const int MaxMarkers = 20_000;
@@ -77,7 +77,7 @@ public static class ProjectStore
                 StartTicks = c.Start.Ticks, DurationTicks = c.Duration.Ticks,
                 Association = c.Association, ParentId = c.ParentId,
                 ParentOffsetTicks = c.ParentOffset.Ticks, OrphanNotice = c.OrphanNotice,
-                EffectsToken = c.EffectsToken
+                EffectsToken = c.EffectsToken, SourceStartTicks = c.SourceStart.Ticks
             }).ToList(),
             Markers = project.Timeline.MarkerItems.Select(m => new MarkerFile
             {
@@ -106,7 +106,7 @@ public static class ProjectStore
             var file = JsonSerializer.Deserialize<ProjectFile>(text, JsonOptions)
                 ?? throw new ProjectFileException("Arquivo de projeto vazio.");
             // Backward-compatible with v6.0 (v1) and v6.1-v6.3 (v2).
-            if (file.FormatVersion is not (1 or 2 or FormatVersion))
+            if (file.FormatVersion is not (1 or 2 or 3 or FormatVersion))
                 throw new ProjectFileException($"Formato {file.FormatVersion} não compatível com esta versão do editor.");
             if (file.Clips is null || file.Markers is null || file.Clips.Count > MaxClips ||
                 file.Markers.Count > MaxMarkers || (file.FormatVersion >= 2 && file.Media is null) ||
@@ -117,7 +117,8 @@ public static class ProjectStore
                 throw new ProjectFileException("Projeto contém entradas vazias.");
             var clips = file.Clips.Select(c => new Clip(c.Id, c.MediaId, c.Kind, c.Track,
                 new MediaTime(c.StartTicks), new MediaTime(c.DurationTicks), c.Association,
-                c.ParentId, new MediaTime(c.ParentOffsetTicks), c.OrphanNotice, c.EffectsToken)).ToArray();
+                c.ParentId, new MediaTime(c.ParentOffsetTicks), c.OrphanNotice, c.EffectsToken,
+                new MediaTime(c.SourceStartTicks)).ToArray();
             var markers = file.Markers.Select(m => new TimelineMarker(m.Id, new MediaTime(m.AtTicks), m.Label!)).ToArray();
             var media = file.Media?.Select(m => new MediaAsset(m.Id, m.Kind,
                 m.DisplayName ?? string.Empty, m.SourcePath ?? string.Empty, m.SizeBytes,
@@ -198,6 +199,7 @@ public static class ProjectStore
         public long ParentOffsetTicks { get; set; }
         public bool OrphanNotice { get; set; }
         public string? EffectsToken { get; set; }
+        public long SourceStartTicks { get; set; }
     }
 
     private sealed class MediaFile

@@ -210,7 +210,14 @@ public static partial class TimelineEngine
 
         // ReflowMain keeps every preceding clip unchanged and repositions only
         // the selected clip's right edge, subsequent clips and their children.
-        return ResizeMain(state, version, id, current.End - requestedLeftEdge);
+        var delta = requestedLeftEdge - current.Start;
+        var result = ResizeMain(state, version, id, current.End - requestedLeftEdge);
+        var clips = result.State.Clips.Select(c => c.Id == id
+            ? c with { SourceStart = current.SourceStart + delta }
+            : c).ToArray();
+        var updated = result.State with { Clips = clips };
+        Validate(updated);
+        return result with { State = updated };
     }
 
     /// <summary>
@@ -226,7 +233,11 @@ public static partial class TimelineEngine
         if (original.Track == MainTrack || start.Ticks < 0 || start.Ticks >= original.End.Ticks)
             throw new TimelineException("INVALID_RESIZE", "Secondary left trim requires a valid start before the end.");
         if (start == original.Start) return Commit(state, state.Clips.ToList());
-        var candidate = original with { Start = start, Duration = original.End - start };
+        var candidate = original with
+        {
+            Start = start, Duration = original.End - start,
+            SourceStart = original.SourceStart + (start - original.Start)
+        };
         if (candidate.Association == AssociationKind.Positioned)
         {
             var parent = state.Clips.SingleOrDefault(c => c.Track == MainTrack &&
@@ -365,7 +376,11 @@ public static partial class TimelineEngine
             throw new TimelineException("INVALID_SPLIT", "Split must be strictly inside the clip.");
 
         var leftDuration = at - original.Start;
-        var right = original with { Id = rightId, Start = at, Duration = original.End - at };
+        var right = original with
+        {
+            Id = rightId, Start = at, Duration = original.End - at,
+            SourceStart = original.SourceStart + leftDuration
+        };
         if (original.Association == AssociationKind.Positioned)
             right = right with { ParentOffset = original.ParentOffset + leftDuration };
         var left = original with { Duration = leftDuration };
