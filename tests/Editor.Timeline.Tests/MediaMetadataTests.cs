@@ -205,6 +205,28 @@ public sealed class MediaMetadataTests
         Assert.Equal(MediaTime.FromSeconds(1).Ticks, Assert.Single(session.Media).DurationTicks);
     }
 
+    [Fact] public void RestoreDurationRewindsTheOriginalSourceStart()
+    {
+        using var temp = new TemporaryFiles();
+        var source = MediaReferences.InspectFile(temp.Create("trimmed.mp4",
+            Mp4File(1000, 704000)));
+        var clip = new Clip(Guid.NewGuid(), source.Id, MediaKind.Video, 0,
+            MediaTime.Zero, MediaTime.FromSeconds(120),
+            SourceStart: MediaTime.FromSeconds(30), SourceRangeVerified: true);
+        var following = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Video, 0,
+            MediaTime.FromSeconds(120), MediaTime.FromSeconds(10));
+        var session = new TimelineSession(new TimelineState(0, [clip, following]), [source]);
+        session.FitClipToSource(clip.Id);
+        Assert.Equal(MediaTime.Zero, session.Current.Find(clip.Id).SourceStart);
+        Assert.Equal(MediaTime.FromSeconds(704), session.Current.Find(clip.Id).Duration);
+        Assert.Equal(MediaTime.FromSeconds(704), session.Current.Find(following.Id).Start);
+        session.Undo();
+        Assert.Equal(clip, session.Current.Find(clip.Id));
+        Assert.Equal(following, session.Current.Find(following.Id));
+        session.Redo();
+        Assert.Equal(MediaTime.Zero, session.Current.Find(clip.Id).SourceStart);
+    }
+
     [Fact] public void CorruptMetadataInProjectIsRejected()
     {
         using var temp = new TemporaryFiles();

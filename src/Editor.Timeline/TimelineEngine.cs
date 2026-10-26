@@ -16,7 +16,9 @@ public static partial class TimelineEngine
                 throw new TimelineException("INVALID_ID", "Missing or duplicate identifier.");
             if (c.Track is < 0 or >= MaxTracks || c.Start.Ticks < 0 || c.Duration.Ticks <= 0)
                 throw new TimelineException("INVALID_CLIP", "Invalid track, start or duration.");
-            try { _ = c.End; } catch (OverflowException) { throw new TimelineException("TIME_OVERFLOW", "Timeline time overflow."); }
+            try { _ = c.End; _ = c.SourceEnd; }
+            catch (OverflowException)
+            { throw new TimelineException("TIME_OVERFLOW", "Timeline or media source time overflow."); }
             if (c.Track == MainTrack && c.Association != AssociationKind.Independent)
                 throw new TimelineException("INVALID_MAIN_ASSOCIATION", "Main clips cannot be positioned.");
             if (c.Association == AssociationKind.Independent && (c.ParentId is not null || c.ParentOffset != MediaTime.Zero))

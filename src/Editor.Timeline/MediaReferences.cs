@@ -163,6 +163,10 @@ public static class MediaReferences
                 throw new MediaReferenceException("O tipo de mídia do clipe não corresponde ao arquivo registrado.");
             if (clip.SourceStart.Ticks < 0)
                 throw new MediaReferenceException("O corte começa antes do início do arquivo original.");
+            if (clip.SourceRangeVerified && clip.Kind is MediaKind.Audio or MediaKind.Video &&
+                media.DurationTicks is null)
+                throw new MediaReferenceException(
+                    "Um clipe verificado precisa da duração da mídia original.");
             if (clip.Kind == MediaKind.Image)
             {
                 if (clip.SourceStart != MediaTime.Zero)
