@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Editor.Timeline/Editor.Timeline.csproj" />
+    <ProjectReference Include="../../src/Editor.Security/Editor.Security.csproj" />
   </ItemGroup>
 </Project>
