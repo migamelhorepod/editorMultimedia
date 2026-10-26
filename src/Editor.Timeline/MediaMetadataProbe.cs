@@ -38,7 +38,7 @@ public static class MediaMetadataProbe
             if (kind == MediaKind.Image || native.DurationTicks is not null)
                 return native;
             // Compressed/other temporal formats: measure, do not guess.
-            return native with { DurationTicks = FfprobeDuration.Read(path) };
+            return native with { DurationTicks = FfprobeDuration.Read(path, kind) };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
             ArgumentException or NotSupportedException or EndOfStreamException or

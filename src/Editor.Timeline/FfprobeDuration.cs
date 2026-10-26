@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.ComponentModel;
+using System.Text.Json;
 
 namespace Editor.Timeline;
 
@@ -26,7 +27,43 @@ public static class FfprobeDuration
         return ticks > 0 ? ticks : null;
     }
 
-    public static long? Read(string chosenLocalFile)
+    public static long? ParseProbeJson(string? json, MediaKind expectedKind)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.Length > 65536) return null;
+        try
+        {
+            using var parsed = JsonDocument.Parse(json);
+            var root = parsed.RootElement;
+            if (!root.TryGetProperty("streams", out var streams) ||
+                streams.ValueKind != JsonValueKind.Array) return null;
+            var expected = expectedKind == MediaKind.Audio ? "audio" :
+                expectedKind == MediaKind.Video ? "video" : "";
+            if (expected.Length == 0) return null;
+
+            long? streamTicks = null;
+            var matched = false;
+            foreach (var stream in streams.EnumerateArray())
+            {
+                if (!stream.TryGetProperty("codec_type", out var type) ||
+                    type.GetString() != expected) continue;
+                matched = true;
+                if (stream.TryGetProperty("duration", out var duration))
+                    streamTicks = ParseDurationSeconds(duration.ToString());
+            }
+            if (!matched) return null;
+            if (root.TryGetProperty("format", out var format) &&
+                format.TryGetProperty("duration", out var declared))
+            {
+                var formatTicks = ParseDurationSeconds(declared.ToString());
+                if (formatTicks is not null) return formatTicks;
+            }
+            return streamTicks;
+        }
+        catch (JsonException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    public static long? Read(string chosenLocalFile, MediaKind expectedKind)
     {
         // Users can configure an absolute executable path in their local machine.
         // This path is never read from a saved project or media file.
@@ -47,8 +84,9 @@ public static class FfprobeDuration
             };
             foreach (var arg in new[] {
                 "-hide_banner", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "-select_streams", expectedKind == MediaKind.Audio ? "a:0" : "v:0",
+                "-show_entries", "format=duration:stream=codec_type,duration",
+                "-of", "json",
                 "-i", chosenLocalFile
             })
                 process.StartInfo.ArgumentList.Add(arg);
@@ -61,7 +99,7 @@ public static class FfprobeDuration
             }
             if (process.ExitCode != 0) return null;
             var text = process.StandardOutput.ReadToEnd();
-            return ParseDurationSeconds(text);
+            return ParseProbeJson(text, expectedKind);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
             Win32Exception or InvalidOperationException or ArgumentException or
