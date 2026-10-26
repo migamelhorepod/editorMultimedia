@@ -74,7 +74,8 @@ public sealed partial class WindowsWorkerPipe
     }
 
     private static bool IsOurPipeName(string? name) =>
-        name is { Length: 45 } && name.StartsWith(Prefix, StringComparison.Ordinal) &&
+        name is not null && name.Length == Prefix.Length + 32 &&
+        name.StartsWith(Prefix, StringComparison.Ordinal) &&
         Guid.TryParseExact(name.AsSpan(Prefix.Length), "N", out _);
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetNamedPipeClientProcessId",
