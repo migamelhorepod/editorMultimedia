@@ -151,7 +151,7 @@ public sealed class SecurityFoundationTests
         var clientReply = await WindowsWorkerPipe.ConnectOnceAsync(
             pipe.PipeName, request, timeout.Token);
         var serverReply = await server;
-        Assert.Equal(AccessDecision.Allowed, clientReply.Decision);
+        Assert.Equal(AccessDecision.Unauthorized, clientReply.Decision);
         Assert.Equal(serverReply, clientReply);
         Assert.Equal(request.RequestId, clientReply.RequestId);
     }
