@@ -296,7 +296,7 @@ public sealed class LeftTrimTests
     [Fact] public void LeftTrimRejectsNonpositiveDurationsAndNegativeVirtualBoundary()
     {
         var first = C(0, 0, 8);
-        var second = C(0, 8, 9);
+        var second = C(0, 8, 9) with { SourceStart = T(8) };
         var secondary = C(3, 4, 3);
         var state = S(first, second, secondary);
         Assert.Equal("INVALID_RESIZE", Assert.Throws<TimelineException>(() =>
@@ -313,7 +313,7 @@ public sealed class LeftTrimTests
         var restored = TimelineEngine.TrimMainLeft(state, 0, second.Id, T(0)).State;
         Assert.Equal(first, restored.Find(first.Id));
         Assert.Equal(T(17), restored.Find(second.Id).Duration);
-        Assert.Equal(T(-8), restored.Find(second.Id).SourceStart);
+        Assert.Equal(T(0), restored.Find(second.Id).SourceStart);
         Assert.Equal(T(9), state.Find(second.Id).Duration);
     }
 }
