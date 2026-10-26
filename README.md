@@ -1,12 +1,40 @@
-# Editor Multimídia — estado atual: v6.4 (branch de desenvolvimento)
+# Editor Multimídia — v6.5 · Fechamento integrado da POC-001
 
-**Windows · C# · .NET 10 · WPF · VS Code · GitHub**. A última versão estável integrada à `main` é a **v6.3**. A proposta v6.4 fica em Pull Request até a validação manual.
+**Windows · C# · .NET 10 · WPF · VS Code · GitHub.**
 
-- **v6.3 (estável):** catálogo do projeto com busca e filtros, referências reutilizáveis, projetos vazios, relocalização de mídias, undo/redo integrado e salvamento manual.
-- **v6.4 (proposta):** duração real de MP4/MOV e WAV compatíveis para novas inserções (sem corte automático de vídeos), dimensões de PNG, comando para restaurar a duração original de clipes existentes, atualização manual de metadados de projetos antigos, persistência em `.emproj.json` v3. Veja [o roteiro completo](docs/POC-001-media-v6.4.md).
-- **Ainda não disponíveis:** reprodução, miniaturas, leitura da duração de MP3/MKV/AVI/WebM, bibliotecas multidiretório e isolamento de decodificadores.
+Esta é **uma única branch de consolidação**, `feature/poc001-fechamento-integrado`, criada a partir da v6.4 ainda não integrada à `main`. A versão estável na `main` permanece **v6.3** até a validação manual e aprovação do Pull Request.
 
-Ao abrir uma versão com novas alterações, execute `dotnet test EditorMultimidia.sln` e `dotnet run --project src/Editor.Timeline.Wpf/Editor.Timeline.Wpf.csproj`. O GitHub Actions compila e testa automaticamente em Windows.
+## Contrato da POC-001
+- **Duração original real para todos os vídeos e áudios importados na timeline**. Nada de 5 s fictícios. WAV PCM/float e MP4/MOV compatíveis usam leitores internos; outros formatos (MP3/M4A/AAC/FLAC/OGG/MKV/AVI/WebM etc.) recorrem ao `ffprobe`. Se não for possível aferir a duração, a importação da ocorrência **falha sem alterar a timeline nem o catálogo**.
+- **Duração legível**: `HH:MM:SS` com fração de até 3 dígitos, por exemplo `00:11:44,7`, no catálogo, clipes, régua e status. O relógio do motor permanece em ticks de 100 ns.
+- **Cortes fiéis à fonte**: o clipe grava `SourceStart` e `Duration`. Cortar pela esquerda desloca o início na fonte, cortar pela direita mantém esse início; dividir mantém dois intervalos contíguos da origem. Nenhuma edição nova ultrapassa os limites de mídia conhecidos.
+- **Associações preservadas**: principal contínua, mídias vinculadas ao pai acompanham seus deslocamentos; mídias independentes mantêm o tempo absoluto. As dez trilhas, a realocação automática, os marcadores, o zoom e o encaixe padrão desligado continuam.
+- **Persistência**: `*.emproj.json` formato **4**, com `sourceStartTicks` e `sourceRangeVerified`; abre projetos legados v1, v2 e v3. Salvar somente por ação do usuário, com substituição atômica de arquivo e proteção contra fechamento com edições pendentes.
+- **Histórico único**: mover, cortar, dividir, restaurar duração original, relocalizar fonte e atualizar metadados participam de Ctrl+Z/Ctrl+Y. Uma operação inválida não muda dados nem cria entrada no histórico.
+
+## Dependência para formatos comprimidos
+
+Para que MP3, M4A, AAC, FLAC, OGG e formatos de vídeo não reconhecidos pelo leitor interno tenham a duração aferida, instale FFmpeg (que inclui `ffprobe`) **uma única vez**, no CMD do Windows:
+
+```cmd
+winget install --id Gyan.FFmpeg --exact
+```
+
+Reabra o VS Code para atualizar o PATH e verifique com `ffprobe -version`. Também é possível definir a variável de ambiente local `EDITOR_FFPROBE_PATH` para um executável `ffprobe.exe` de confiança instalado em um caminho absoluto. O editor não instala dependências silenciosamente.
+
+## Executar no VS Code
+
+```cmd
+dotnet test EditorMultimidia.sln
+```
+
+```cmd
+dotnet run --project src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj
+```
+
+Consulte **[POC-001 — checklist final e critérios de aceite](docs/POC-001-fechamento-integrado.md)** antes de aprovar o PR e integrar à `main`.
+
+**Limite consciente:** a POC-001 trata edição lógica e integridade da timeline. Não há reprodução, decodificação, miniaturas, renderização ou exportação (POC-002), worker restrito e grants Windows (POC-003), nem metas de desempenho da biblioteca HDD (POC-004). Invocar `ffprobe` em processo separado **não constitui isolamento de segurança comprovado**.
 
 ---
 
