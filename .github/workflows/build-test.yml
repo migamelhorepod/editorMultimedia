@@ -5,9 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - name: Obter codigo
         uses: actions/checkout@v5
@@ -23,5 +27,51 @@ jobs:
       - name: Compilar todos os projetos (inclui WPF)
         run: dotnet build EditorMultimidia.sln --configuration Release --no-restore
 
-      - name: Executar testes
-        run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build
+      - name: Executar testes unitarios
+        run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
+
+      # Default success() condition: integration never runs after a failed unit step.
+      - name: Preparar Node.js 24 LTS
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/playwright/package-lock.json
+
+      - name: Preparar FFmpeg e ffprobe reais
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress --limit-output
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+            $env:Path -split ';' | Where-Object { $_ } | Add-Content $env:GITHUB_PATH
+          }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Instalar dependencias TypeScript fixadas
+        working-directory: tests/playwright
+        run: npm ci
+
+      - name: Compilar auxiliar de integracao
+        working-directory: tests/playwright
+        run: npm run build:driver
+
+      - name: Executar Playwright apos os unitarios
+        working-directory: tests/playwright
+        run: npm run test:ci
+
+      - name: Publicar relatorios de testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-testes
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            TestResults/
+            tests/playwright/playwright-report/
+            tests/playwright/test-results/

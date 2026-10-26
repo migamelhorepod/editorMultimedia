@@ -107,3 +107,8 @@ dotnet run --project src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj
 ## Validação do pacote
 
 Estrutura do projeto, XML/XAML, vínculos de eventos e formato do ZIP revisados no ambiente de autoria. **O SDK .NET/WPF não está instalado neste ambiente**, portanto o build e os **128 casos automatizados estimados** (*105 anteriores + 23 adicionados*) continuam pendentes de execução no computador Windows do usuário.
+
+
+## Integração Playwright + TypeScript
+
+Após os testes unitários, o GitHub Actions executa a suíte de integração do motor real com Playwright Test e TypeScript. Ela não automatiza a interface nativa WPF. No CMD, na raiz do repositório, execute `tests\run-all.cmd` para a mesma sequência local. Pré-requisitos, relatórios e rastreabilidade dos 29 CTs: [guia de automação](docs/POC-001-automacao-playwright.md).

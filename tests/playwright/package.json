@@ -1,0 +1,17 @@
+{
+  "name": "editor-multimidia-integration",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build:driver": "dotnet build ../Editor.Integration.Driver/Editor.Integration.Driver.csproj --configuration Release",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:driver && npm run typecheck && playwright test",
+    "test:ci": "npm run typecheck && playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.10.1",
+    "typescript": "7.0.2"
+  }
+}
