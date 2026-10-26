@@ -48,8 +48,7 @@ for (const op of ['resize', 'trimLeft']) {
   test(`CT-014/015: Dado redo / Quando ${op} ultrapassa fonte / Então falha sem mudar estado`, async ({ folder }) => {
     const file = await wave(folder), clip = id();
     const r = await run([insert(file, clip, 3), { op: 'marker', id: id(), seconds: 1 }, { op: 'undo' }, { op, id: clip, seconds: op === 'resize' ? 13 : 2 }, { op: 'redo' }]);
-    allOk(r.filter((_, i) => i !== 3)); expect(r[3].error?.type).toBe('TimelineException');
-    expect(r[3].error?.code).toBe('TEMPORAL_STRETCH');
+    allOk(r.filter((_, i) => i !== 3)); expect(r[3].error?.type).toBe('MediaReferenceException');
     expect(r[3].project).toEqual(r[2].project); expect(r[3].canRedo).toBe(true); expect(r[4].project).toEqual(r[1].project);
   });
 }
@@ -136,44 +135,53 @@ test('CT-011/012/013/017: Dado vídeo real / Quando cortar, dividir e restaurar 
 });
 
 
-test('UI-06: Dado áudio real encurtado / Quando esticar ambos os lados / Então é proibido sem mudar histórico', async ({ folder }) => {
-  const file = await wave(folder), clip = id(), marker = id();
+test('CT-014/015: Dado áudio cortado / Quando alongar até o fim da fonte / Então permite sem extrapolar', async ({ folder }) => {
+  const file = await wave(folder), clip = id();
   const r = await run([
-    insert(file, clip, 3),
+    insert(file, clip, 3), // WAV de 12 segundos
     { op: 'resize', id: clip, seconds: 8 },
-    { op: 'marker', id: marker, seconds: 1 },
+    { op: 'trimLeft', id: clip, seconds: 5 }, // source offset 2s e duração 6s
+    { op: 'resize', id: clip, seconds: 9 }, // intervalo da fonte [2s, 11s)
+    { op: 'trimLeft', id: clip, seconds: 4 }, // intervalo [1s, 11s)
+    { op: 'resize', id: clip, seconds: 12 }, // ultrapassa o fim original
+    { op: 'trimLeft', id: clip, seconds: 2 }, // avançaria antes do início original
     { op: 'undo' },
-    { op: 'resize', id: clip, seconds: 9 },
-    { op: 'trimLeft', id: clip, seconds: 2 },
     { op: 'redo' },
   ]);
-  allOk(r.filter((_, i) => i !== 4 && i !== 5));
-  for (const index of [4, 5]) {
-    expect(r[index].error?.type).toBe('TimelineException');
-    expect(r[index].error?.code).toBe('TEMPORAL_STRETCH');
-    expect(r[index].project).toEqual(r[3].project);
-    expect(r[index].canRedo).toBe(true);
+  allOk(r.filter((_, i) => i !== 5 && i !== 6));
+  expect(r[3].project.clips[0]).toMatchObject({
+    startTicks: ticks(5), durationTicks: ticks(9), sourceStartTicks: ticks(2)
+  });
+  expect(r[4].project.clips[0]).toMatchObject({
+    startTicks: ticks(4), durationTicks: ticks(10), sourceStartTicks: ticks(1)
+  });
+  for (const index of [5, 6]) {
+    expect(r[index].error?.type).toBe('MediaReferenceException');
+    expect(r[index].project).toEqual(r[4].project);
   }
-  expect(r[6].project).toEqual(r[2].project);
+  expect(r[7].project).toEqual(r[3].project);
+  expect(r[8].project).toEqual(r[4].project);
 });
 
-test('UI-06/UI-07: Dado vídeo real cortado / Quando esticar ou restaurar / Então só restauração recupera a duração', async ({ folder }) => {
+test('CT-014/017: Dado vídeo cortado / Quando alongar e restaurar / Então aplica limites e histórico', async ({ folder }) => {
   const file = await media(folder, 'mp4', true), clip = id();
   const r = await run([
-    insert(file, clip),
+    insert(file, clip), // MP4 de 12 segundos
     { op: 'resize', id: clip, seconds: 8 },
-    { op: 'resize', id: clip, seconds: 9 },
-    { op: 'trimLeft', id: clip, seconds: -1 },
+    { op: 'resize', id: clip, seconds: 9 }, // permitido
+    { op: 'resize', id: clip, seconds: 13 }, // ultrapassa a fonte
+    { op: 'trimLeft', id: clip, seconds: -1 }, // posição negativa
     { op: 'restore', id: clip },
     { op: 'undo' },
     { op: 'redo' },
   ]);
-  allOk(r.filter((_, i) => i !== 2 && i !== 3));
-  expect(r[2].error?.code).toBe('TEMPORAL_STRETCH');
-  expect(r[3].error?.code).toBe('INVALID_RESIZE');
-  expect(r[2].project).toEqual(r[1].project);
-  expect(r[3].project).toEqual(r[1].project);
-  expect(r[4].project.clips[0].durationTicks).toBe(ticks(12));
-  expect(r[5].project).toEqual(r[1].project);
-  expect(r[6].project).toEqual(r[4].project);
+  allOk(r.filter((_, i) => i !== 3 && i !== 4));
+  expect(r[2].project.clips[0].durationTicks).toBe(ticks(9));
+  expect(r[3].error?.type).toBe('MediaReferenceException');
+  expect(r[4].error?.code).toBe('INVALID_RESIZE');
+  expect(r[3].project).toEqual(r[2].project);
+  expect(r[4].project).toEqual(r[2].project);
+  expect(r[5].project.clips[0].durationTicks).toBe(ticks(12));
+  expect(r[6].project).toEqual(r[2].project);
+  expect(r[7].project).toEqual(r[5].project);
 });

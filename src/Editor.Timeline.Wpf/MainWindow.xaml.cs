@@ -1074,8 +1074,12 @@ public partial class MainWindow : Window
                             clip.Id, resizePreviewDuration);
                 // Preview the same source-bound validation as the actual commit:
                 // invalid over-extensions must not appear to be valid while dragging.
-                MediaReferences.ValidateCatalog(session.Media,
-                    MediaReferences.VerifyEditedRanges(session.Current, preview.State, session.Media));
+                // Only the resized occurrence changes its source interval.
+                // Check it directly rather than scanning the entire library
+                // during every pointer movement.
+                var source = session.Media.FirstOrDefault(m => m.Id == clip.MediaId);
+                if (source is not null)
+                    MediaReferences.CheckSourceBounds(preview.State.Find(clip.Id), source);
                 previewState = preview.State;
                 resolvedPreviewTrack = preview.State.Find(clip.Id).Track;
                 previewError = null;

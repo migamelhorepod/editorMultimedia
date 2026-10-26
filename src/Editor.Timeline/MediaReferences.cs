@@ -179,6 +179,21 @@ public static class MediaReferences
         }
     }
 
+    /// <summary>
+    /// Re-extending a cut is allowed within the original measured media range.
+    /// Shared by TimelineSession commits and WPF drag previews.
+    /// </summary>
+    public static void CheckSourceBounds(Clip clip, MediaAsset asset)
+    {
+        if (clip.Kind is not (MediaKind.Audio or MediaKind.Video) ||
+            asset.DurationTicks is not long measured) return;
+        if (clip.SourceStart.Ticks < 0 ||
+            (decimal)clip.SourceStart.Ticks + clip.Duration.Ticks > measured)
+            throw new MediaReferenceException(
+                "O corte ultrapassa o início ou fim do arquivo original. " +
+                "A alteração não foi aplicada.");
+    }
+
     /// <summary>Checks new/edited time ranges without rewriting legacy clip edits.</summary>
     public static TimelineState VerifyEditedRanges(
         TimelineState before, TimelineState after, IReadOnlyList<MediaAsset> catalog)
@@ -189,16 +204,12 @@ public static class MediaReferences
         {
             var asset = catalog.FirstOrDefault(m => m.Id == c.MediaId);
             if (asset is null || c.Kind == MediaKind.Image ||
-                asset.DurationTicks is not long measured) return c;
+                asset.DurationTicks is not long) return c;
             var rangeWasEdited = !old.TryGetValue(c.Id, out var prior) ||
                 c.SourceStart != prior.SourceStart || c.Duration != prior.Duration;
             if (!rangeWasEdited) return c;
 
-            if (c.SourceStart.Ticks < 0 ||
-                (decimal)c.SourceStart.Ticks + c.Duration.Ticks > measured)
-                throw new MediaReferenceException(
-                    "O corte ultrapassa o início ou fim do arquivo original. " +
-                    "A alteração não foi aplicada.");
+            CheckSourceBounds(c, asset);
             changed |= !c.SourceRangeVerified;
             return c with { SourceRangeVerified = true };
         }).ToArray();
