@@ -245,7 +245,7 @@ Um caso com medição na interface é **inspeção lógica de edição**: esta P
 
 ### CT-028 — Cancelar e abrir JSON inválido não apaga projeto atual | P0
 **Pré-condição:** projeto com edições não salvas e uma cópia descartável de `.emproj.json` inválida.  
-**Passos:** (1) Modifique uma mídia na timeline e confirme o `*` na janela. (2) Faça `Ctrl+N` ou feche a janela; escolha **Cancelar** na confirmação. (3) Escolha **Salvar como…** e cancele o seletor. (4) Tente abrir JSON inválido de teste.  
+**Passos:** (1) Modifique uma mídia na timeline e confirme o `*` na janela. (2) Faça `Ctrl+N` ou feche a janela; escolha **Cancelar** na confirmação. (3) Escolha **Salvar como…** e cancele o seletor. (4) Selecione **Arquivo > Abrir projeto…**; quando houver confirmação de alterações não salvas, escolha **Não** (não salvar, mas continuar a tentativa de abertura). (5) Selecione o JSON inválido de teste.  
 **Esperado:** projeto atual e edição pendente permanecem intactos; nenhum arquivo de origem é apagado; erros são informados sem substituir o projeto ativo.  
 **Resultado:** [ ] Aprovado [ ] Reprovado [ ] Bloqueado [ ] N/A  
 **Evidência/observação:** ____________________
