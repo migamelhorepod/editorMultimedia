@@ -13,5 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Editor.Timeline/Editor.Timeline.csproj" />
     <ProjectReference Include="../../src/Editor.Security/Editor.Security.csproj" />
+    <!-- Build the diagnostic executable even when only this test project is run. -->
+    <ProjectReference Include="../../src/Editor.Security.Worker/Editor.Security.Worker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

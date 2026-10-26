@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Text;
 using Editor.Security;
 using Xunit;
@@ -153,6 +154,45 @@ public sealed class SecurityFoundationTests
         Assert.Equal(AccessDecision.Allowed, clientReply.Decision);
         Assert.Equal(serverReply, clientReply);
         Assert.Equal(request.RequestId, clientReply.RequestId);
+    }
+
+    [Fact]
+    public async Task DiagnosticWorkerRunsInSeparateWindowsProcessAndIdentifiesItsRealPid()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // This tests a REAL separate process, not an OS-restricted sandbox.
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Test configuration not found.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var workerDll = Path.Combine(root, "src", "Editor.Security.Worker",
+            "bin", configuration, "net10.0", "Editor.Security.Worker.dll");
+        Assert.True(File.Exists(workerDll), $"Diagnostic worker not built: {workerDll}");
+
+        var registry = new AccessGrantRegistry(Guid.NewGuid());
+        var pipe = new WindowsWorkerPipe(registry);
+        var info = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardError = true
+        };
+        info.ArgumentList.Add(workerDll);
+        info.ArgumentList.Add("--pipe");
+        info.ArgumentList.Add(pipe.PipeName);
+        using var worker = new Process { StartInfo = info };
+        Assert.True(worker.Start());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            var response = await pipe.ServeOnceAsync(worker.Id, timeout.Token);
+            Assert.True(response.Accepted);
+            await worker.WaitForExitAsync(timeout.Token);
+            Assert.Equal(0, worker.ExitCode);
+        }
+        finally
+        {
+            if (!worker.HasExited) worker.Kill(entireProcessTree: true);
+        }
     }
 
     [Fact]
