@@ -178,7 +178,7 @@ test('CT-014/017: Dado vídeo cortado / Quando alongar e restaurar / Então apli
   allOk(r.filter((_, i) => i !== 3 && i !== 4));
   expect(r[2].project.clips[0].durationTicks).toBe(ticks(9));
   expect(r[3].error?.type).toBe('MediaReferenceException');
-  expect(r[4].error?.code).toBe('INVALID_RESIZE');
+  expect(r[4].error?.type).toBe('MediaReferenceException');
   expect(r[3].project).toEqual(r[2].project);
   expect(r[4].project).toEqual(r[2].project);
   expect(r[5].project.clips[0].durationTicks).toBe(ticks(12));
