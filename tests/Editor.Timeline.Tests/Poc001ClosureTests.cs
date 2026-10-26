@@ -171,10 +171,12 @@ public sealed class Poc001ClosureTests
     public void ExtendingClipBeforeFirstSourceFrameIsRejectedAtomically()
     {
         var video = File(seconds: 15);
-        var first = ClipFrom(video, 8, start: 0);
-        var session = new TimelineSession(new TimelineState(0, [first]), [video]);
+        var prior = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Video, 0, T(0), T(10));
+        var first = ClipFrom(video, 8, start: 10);
+        var session = new TimelineSession(new TimelineState(0, [prior, first]), [video]);
         Assert.Throws<MediaReferenceException>(() =>
-            session.Execute(s => TimelineEngine.TrimMainLeft(s, s.Version, first.Id, T(-2))));
+            session.Execute(s => TimelineEngine.TrimMainLeft(s, s.Version, first.Id, T(8))));
+        Assert.Equal(prior, session.Current.Find(prior.Id));
         Assert.Same(first, session.Current.Find(first.Id));
         Assert.False(session.CanUndo);
     }
