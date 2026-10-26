@@ -12,8 +12,17 @@ public static class MediaMetadataProbe
     private const int MaxWaveChunks = 128;
     private const long MaxWaveHeaderScan = 4L * 1024 * 1024;
 
-    public static MediaMetadata Read(string path, MediaKind kind)
+    public static MediaMetadata Read(string path, MediaKind kind) =>
+        Read(path, kind, FfprobeDuration.Read);
+
+    /// <summary>
+    /// The probe callback makes fallback policy independently testable,
+    /// whether or not FFmpeg is installed on this machine.
+    /// </summary>
+    public static MediaMetadata Read(string path, MediaKind kind,
+        Func<string, MediaKind, long?> probeDuration)
     {
+        ArgumentNullException.ThrowIfNull(probeDuration);
         // A damaged or unsupported file is still allowed into the library,
         // but no real metadata is claimed for it.
         try
@@ -23,10 +32,12 @@ public static class MediaMetadataProbe
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
             var extension = Path.GetExtension(path);
+            var isWave = kind == MediaKind.Audio &&
+                extension.Equals(".wav", StringComparison.OrdinalIgnoreCase);
+            var allowWaveFallback = false;
             var native = kind switch
             {
-                MediaKind.Audio when extension.Equals(".wav",
-                    StringComparison.OrdinalIgnoreCase) => ReadWave(file),
+                MediaKind.Audio when isWave => ReadWave(file, out allowWaveFallback),
                 MediaKind.Video when extension.Equals(".mp4",
                     StringComparison.OrdinalIgnoreCase) => ReadIsoMovie(file, requireFtyp: true),
                 MediaKind.Video when extension.Equals(".mov",
@@ -37,8 +48,14 @@ public static class MediaMetadataProbe
             };
             if (kind == MediaKind.Image || native.DurationTicks is not null)
                 return native;
+            // Damaged RIFF/WAVE headers must not become "valid" simply because
+            // ffprobe happens to recover a guessed duration on some machines.
+            // Only a structurally valid WAV with an unsupported codec may
+            // proceed to the external probe.
+            if (isWave && !allowWaveFallback)
+                return native;
             // Compressed/other temporal formats: measure, do not guess.
-            return native with { DurationTicks = FfprobeDuration.Read(path, kind) };
+            return native with { DurationTicks = probeDuration(path, kind) };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
             ArgumentException or NotSupportedException or EndOfStreamException or
@@ -65,9 +82,12 @@ public static class MediaMetadataProbe
         return new MediaMetadata(PixelWidth: (int)width, PixelHeight: (int)height);
     }
 
-    private static MediaMetadata ReadWave(Stream file)
+    private static MediaMetadata ReadWave(Stream file, out bool allowExternalProbe)
     {
-        // RIFF/WAVE, little endian; this parser supports PCM/IEEE float only.
+        allowExternalProbe = false;
+        // RIFF/WAVE, little endian. PCM/IEEE float is read natively.
+        // Recognized compressed codecs are delegated only when the RIFF
+        // structure itself is consistent (header, chunks, data bounds).
         Span<byte> riff = stackalloc byte[12];
         if (!ReadExactly(file, riff) || !riff[..4].SequenceEqual("RIFF"u8) ||
             !riff[8..12].SequenceEqual("WAVE"u8))
@@ -82,6 +102,7 @@ public static class MediaMetadataProbe
         uint dataBytes = 0;
         var foundFmt = false;
         var foundData = false;
+        var unsupportedCodec = false;
 
         Span<byte> chunk = stackalloc byte[8];
         Span<byte> fmt = stackalloc byte[16];
@@ -103,12 +124,28 @@ public static class MediaMetadataProbe
                 var byteRate = BinaryPrimitives.ReadUInt32LittleEndian(fmt[8..12]);
                 var align = BinaryPrimitives.ReadUInt16LittleEndian(fmt[12..14]);
                 var bits = BinaryPrimitives.ReadUInt16LittleEndian(fmt[14..16]);
-                if (format is not (1 or 3) || channels is < 1 or > 32 ||
-                    rate is < 1 or > 768000 || align == 0 ||
-                    bits is not (8 or 16 or 24 or 32 or 64) ||
-                    (uint)channels * (uint)(bits / 8) != align ||
-                    (ulong)rate * align != byteRate)
+                if (format == 0 || channels is < 1 or > 32 ||
+                    rate is < 1 or > 768000 || align == 0 || byteRate == 0)
                     return new MediaMetadata();
+
+                unsupportedCodec = format is not (1 or 3);
+                if (!unsupportedCodec)
+                {
+                    // Uncompressed PCM/IEEE float must have internally
+                    // consistent byte rate and sample alignment.
+                    if (bits is not (8 or 16 or 24 or 32 or 64) ||
+                        (uint)channels * (uint)(bits / 8) != align ||
+                        (ulong)rate * align != byteRate)
+                        return new MediaMetadata();
+                }
+                else if (format is 6 or 7 &&
+                         (bits != 8 || align != channels))
+                {
+                    // A-law/µ-law use 8-bit samples. A synthetic WAV with a
+                    // µ-law tag and 16-bit PCM payload is malformed, not a
+                    // valid compressed WAV eligible for an external fallback.
+                    return new MediaMetadata();
+                }
                 foundFmt = true;
                 bytesPerSecond = byteRate;
                 blockAlign = align;
@@ -125,8 +162,17 @@ public static class MediaMetadataProbe
             if (foundFmt && foundData) break;
         }
 
-        if (!foundFmt || !foundData || dataBytes == 0 ||
-            dataBytes % blockAlign != 0) return new MediaMetadata();
+        if (!foundFmt || !foundData || dataBytes == 0)
+            return new MediaMetadata();
+        if (unsupportedCodec)
+        {
+            // A recognized but not natively decoded encoding may use block
+            // sizes unrelated to PCM. Trust only the external measured result.
+            allowExternalProbe = true;
+            return new MediaMetadata();
+        }
+        if (dataBytes % blockAlign != 0)
+            return new MediaMetadata();
         var ticks = (long)decimal.Truncate(
             (decimal)dataBytes * TimeSpan.TicksPerSecond / bytesPerSecond);
         if (ticks is <= 0 || ticks > TimeSpan.FromDays(7).Ticks)
