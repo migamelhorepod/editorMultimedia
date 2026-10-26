@@ -185,3 +185,25 @@ test('CT-014/017: Dado vídeo cortado / Quando alongar e restaurar / Então apli
   expect(r[6].project).toEqual(r[2].project);
   expect(r[7].project).toEqual(r[5].project);
 });
+
+test('UI-06: Dado primeiro vídeo cortado à esquerda / Quando alongar / Então recupera a fonte mantendo início 0', async ({ folder }) => {
+  const file = await media(folder, 'mp4', true), clip = id();
+  const r = await run([
+    insert(file, clip),
+    { op: 'trimLeft', id: clip, seconds: 2 },
+    { op: 'trimLeft', id: clip, seconds: -2 }, // virtual edge; timeline remains anchored at zero
+    { op: 'trimLeft', id: clip, seconds: -1 }, // exceeds beginning of source
+    { op: 'undo' }, { op: 'redo' }
+  ]);
+  allOk(r.filter((_, i) => i !== 3));
+  expect(r[1].project.clips[0]).toMatchObject({
+    startTicks: 0, sourceStartTicks: ticks(2), durationTicks: ticks(10)
+  });
+  expect(r[2].project.clips[0]).toMatchObject({
+    startTicks: 0, sourceStartTicks: 0, durationTicks: ticks(12)
+  });
+  expect(r[3].error?.type).toBe('MediaReferenceException');
+  expect(r[3].project).toEqual(r[2].project);
+  expect(r[4].project).toEqual(r[1].project);
+  expect(r[5].project).toEqual(r[2].project);
+});
