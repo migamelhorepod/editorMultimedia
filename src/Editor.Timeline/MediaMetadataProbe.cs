@@ -23,7 +23,7 @@ public static class MediaMetadataProbe
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
             var extension = Path.GetExtension(path);
-            return kind switch
+            var native = kind switch
             {
                 MediaKind.Audio when extension.Equals(".wav",
                     StringComparison.OrdinalIgnoreCase) => ReadWave(file),
@@ -35,6 +35,10 @@ public static class MediaMetadataProbe
                     StringComparison.OrdinalIgnoreCase) => ReadPng(file),
                 _ => new MediaMetadata()
             };
+            if (kind == MediaKind.Image || native.DurationTicks is not null)
+                return native;
+            // Compressed/other temporal formats: measure, do not guess.
+            return native with { DurationTicks = FfprobeDuration.Read(path) };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
             ArgumentException or NotSupportedException or EndOfStreamException or

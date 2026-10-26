@@ -74,6 +74,11 @@ public static class MediaReferences
         if (replacement.Kind != current.Kind)
             throw new MediaReferenceException(
                 "Selecione uma mídia do mesmo tipo (vídeo, áudio ou imagem).");
+        if (replacement.Kind is MediaKind.Video or MediaKind.Audio &&
+            replacement.DurationTicks is null)
+            throw new MediaReferenceException(
+                "Não foi possível medir a duração do novo arquivo. " +
+                "A referência anterior foi preservada.");
 
         if (catalog.Any(m => m.Id != mediaId &&
             SameSource(m.SourcePath, replacement.SourcePath)))
