@@ -326,4 +326,56 @@ public sealed class Poc001ClosureTests
         Assert.Null(FfprobeDuration.ParseDurationSeconds("1,2"));
         Assert.Null(FfprobeDuration.ParseDurationSeconds("999999999999999999999"));
     }
+
+    [Fact]
+    public void FfprobeRejectsContainersWithoutAnAudioStream()
+    {
+        var videoOnly = """
+            { "streams": [{ "codec_type": "video", "duration": "120.0" }],
+              "format": { "duration": "120.0" } }
+            """;
+        Assert.Null(FfprobeDuration.ParseProbeJson(videoOnly, MediaKind.Audio));
+        Assert.Equal(T(120).Ticks,
+            FfprobeDuration.ParseProbeJson(videoOnly, MediaKind.Video));
+    }
+
+    [Fact]
+    public void FfprobePrefersContainerDurationAndCanFallBackToStreamDuration()
+    {
+        var audioWithFormat = """
+            { "streams": [{ "codec_type": "audio", "duration": "11.2" }],
+              "format": { "duration": "11.25" } }
+            """;
+        Assert.Equal(T(11.25m).Ticks,
+            FfprobeDuration.ParseProbeJson(audioWithFormat, MediaKind.Audio));
+
+        var rawAudio = """
+            { "streams": [{ "codec_type": "audio", "duration": "23.125" }],
+              "format": { "duration": "N/A" } }
+            """;
+        Assert.Equal(T(23.125m).Ticks,
+            FfprobeDuration.ParseProbeJson(rawAudio, MediaKind.Audio));
+    }
+
+    [Fact]
+    public void FfprobeMalformedValuesAreNeverTreatedAsRealDurations()
+    {
+        Assert.Null(FfprobeDuration.ParseProbeJson("not json", MediaKind.Audio));
+        Assert.Null(FfprobeDuration.ParseProbeJson("{\"streams\":[]}", MediaKind.Audio));
+        Assert.Null(FfprobeDuration.ParseProbeJson("{\"streams\":[{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"N/A\"}}",
+            MediaKind.Audio));
+        Assert.Null(FfprobeDuration.ParseProbeJson("{\"streams\":[{\"codec_type\":\"video\"}],\"format\":{\"duration\":\"1\"}}",
+            MediaKind.Audio));
+    }
+
+    [Fact]
+    public void SavedVerifiedSourceRangeWithoutDurationIsRejected()
+    {
+        var video = File() with { DurationTicks = null };
+        var clip = ClipFrom(video, 4);
+        var project = new EditorProject(Guid.NewGuid(), "Inválido",
+            new TimelineState(0, [clip]), [video]);
+        Assert.Throws<ProjectFileException>(() => ProjectStore.Serialize(project));
+    }
+
 }
