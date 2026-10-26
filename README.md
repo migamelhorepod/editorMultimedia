@@ -1,3 +1,45 @@
+# Editor Multimídia — v6.5 · Fechamento integrado da POC-001
+
+**Windows · C# · .NET 10 · WPF · VS Code · GitHub.**
+
+Esta é **uma única branch de consolidação**, `feature/poc001-fechamento-integrado`, criada a partir da v6.4 ainda não integrada à `main`. A versão estável na `main` permanece **v6.3** até a validação manual e aprovação do Pull Request.
+
+## Contrato da POC-001
+- **Duração original real para todos os vídeos e áudios importados na timeline**. Nada de 5 s fictícios. WAV PCM/float e MP4/MOV compatíveis usam leitores internos; outros formatos (MP3/M4A/AAC/FLAC/OGG/MKV/AVI/WebM etc.) recorrem ao `ffprobe`. Se não for possível aferir a duração, a importação da ocorrência **falha sem alterar a timeline nem o catálogo**.
+- **Duração legível**: `HH:MM:SS` com fração de até 3 dígitos, por exemplo `00:11:44,7`, no catálogo, clipes, régua e status. O relógio do motor permanece em ticks de 100 ns.
+- **Cortes fiéis à fonte**: o clipe grava `SourceStart` e `Duration`. Cortar pela esquerda desloca o início na fonte, cortar pela direita mantém esse início; dividir mantém dois intervalos contíguos da origem. **Áudios e vídeos podem ser encurtados e depois alongados novamente**, pelas duas bordas, desde que o trecho resultante permaneça dentro da duração real do arquivo original. Imagens podem ter tempo de exibição ampliado livremente. Para recuperar o arquivo inteiro (inclusive cortes à esquerda), há **Restaurar duração original do clipe** no clique direito.
+- **Associações preservadas**: principal contínua, mídias vinculadas ao pai acompanham seus deslocamentos; mídias independentes mantêm o tempo absoluto. As dez trilhas, a realocação automática, os marcadores, o zoom e o encaixe padrão desligado continuam.
+- **Persistência**: `*.emproj.json` formato **4**, com `sourceStartTicks` e `sourceRangeVerified`; abre projetos legados v1, v2 e v3. Salvar somente por ação do usuário, com substituição atômica de arquivo e proteção contra fechamento com edições pendentes.
+- **Histórico único**: mover, cortar, dividir, restaurar duração original, relocalizar fonte e atualizar metadados participam de Ctrl+Z/Ctrl+Y. Uma operação inválida não muda dados nem cria entrada no histórico.
+
+## Dependência para formatos comprimidos
+
+Para que MP3, M4A, AAC, FLAC, OGG e formatos de vídeo não reconhecidos pelo leitor interno tenham a duração aferida, instale FFmpeg (que inclui `ffprobe`) **uma única vez**, no CMD do Windows:
+
+```cmd
+winget install --id Gyan.FFmpeg --exact
+```
+
+Reabra o VS Code para atualizar o PATH e verifique com `ffprobe -version`. Também é possível definir a variável de ambiente local `EDITOR_FFPROBE_PATH` para um executável `ffprobe.exe` de confiança instalado em um caminho absoluto. O editor não instala dependências silenciosamente.
+
+## Executar no VS Code
+
+```cmd
+dotnet test EditorMultimidia.sln
+```
+
+```cmd
+dotnet run --project src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj
+```
+
+Consulte **[POC-001 — checklist final e critérios de aceite](docs/POC-001-fechamento-integrado.md)** antes de aprovar o PR e integrar à `main`.
+
+**Limite consciente:** a POC-001 trata edição lógica e integridade da timeline. Não há reprodução, decodificação, miniaturas, renderização ou exportação (POC-002), worker restrito e grants Windows (POC-003), nem metas de desempenho da biblioteca HDD (POC-004). Invocar `ffprobe` em processo separado **não constitui isolamento de segurança comprovado**.
+
+---
+
+## Histórico inicial (v6.0.x)
+
 # v6.0.2 — correção de avisos xUnit2031
 
 Foram substituídos os dois usos de `Assert.Single(collection.Where(predicate))` por `Assert.Single(collection, predicate)` em `ProjectStoreTests.cs`. Sem mudanças de comportamento no motor ou na interface.
@@ -65,3 +107,8 @@ dotnet run --project src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj
 ## Validação do pacote
 
 Estrutura do projeto, XML/XAML, vínculos de eventos e formato do ZIP revisados no ambiente de autoria. **O SDK .NET/WPF não está instalado neste ambiente**, portanto o build e os **128 casos automatizados estimados** (*105 anteriores + 23 adicionados*) continuam pendentes de execução no computador Windows do usuário.
+
+
+## Integração Playwright + TypeScript
+
+Após os testes unitários, o GitHub Actions executa a suíte de integração do motor real com Playwright Test e TypeScript. Ela não automatiza a interface nativa WPF. No CMD, na raiz do repositório, execute `tests\run-all.cmd` para a mesma sequência local. Pré-requisitos, relatórios e rastreabilidade dos 29 CTs: [guia de automação](docs/POC-001-automacao-playwright.md).

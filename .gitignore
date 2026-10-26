@@ -26,3 +26,9 @@ exportacoes/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+
+# Playwright integration
+node_modules/
+tests/playwright/playwright-report/
+tests/playwright/test-results/

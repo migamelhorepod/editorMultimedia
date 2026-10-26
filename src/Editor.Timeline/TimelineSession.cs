@@ -32,6 +32,12 @@ public sealed class TimelineSession
         if (result.State.Version != Current.Version + 1)
             throw new TimelineException("INVALID_COMMAND", "Command must produce next version.");
         var candidateMedia = nextMedia?.ToArray() ?? Media;
+        // Validate physical source bounds only for ranges actually created or edited.
+        // Legacy clips may exceed newly measured source lengths; merely refreshing
+        // metadata, moving clips or saving may not silently erase user edits.
+        var verified = MediaReferences.VerifyEditedRanges(Current, result.State, candidateMedia);
+        if (!ReferenceEquals(verified, result.State))
+            result = result with { State = verified };
         MediaReferences.ValidateCatalog(candidateMedia, result.State);
 
         // Every operation commits both pieces together, or neither.
@@ -53,6 +59,55 @@ public sealed class TimelineSession
         if (Media.SequenceEqual(next)) return;
         Execute(s => new CommandResult(
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
+    /// <summary>Refresh one imported file's measurements with a reversible edit.</summary>
+    public void RefreshMediaMetadata(Guid mediaId)
+    {
+        var next = MediaReferences.RefreshMetadata(Media, mediaId);
+        if (Media.SequenceEqual(next)) return;
+        Execute(s => new CommandResult(
+            s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
+    /// <summary>
+    /// Explicitly replace a clip's current trim with the measured source duration.
+    /// Also refresh old project metadata if needed. Both changes form one undo
+    /// entry; every following main-track clip is rippled by the timeline engine.
+    /// </summary>
+    public void FitClipToSource(Guid clipId)
+    {
+        var clip = Current.Find(clipId);
+        if (clip.Kind == MediaKind.Image)
+            throw new MediaReferenceException(
+                "Imagens possuem duração editável, não duração original aferida.");
+        var asset = Media.FirstOrDefault(m => m.Id == clip.MediaId)
+            ?? throw new MediaReferenceException("Este clipe não possui arquivo vinculado.");
+
+        // An explicit restore action reads the current file rather than trusting
+        // potentially old duration measurements persisted in the project.
+        var refreshed = MediaReferences.RefreshMetadata(Media, asset.Id);
+        var measured = refreshed.First(m => m.Id == asset.Id).DurationTicks;
+        if (measured is not long ticks)
+            throw new MediaReferenceException(
+                "A duração real desta mídia não pôde ser determinada. " +
+                "Nenhum corte foi alterado.");
+        if (clip.Duration.Ticks == ticks && clip.SourceStart == MediaTime.Zero &&
+            Media.SequenceEqual(refreshed))
+            return;
+
+        var desired = new MediaTime(ticks);
+        Execute(state =>
+        {
+            var adjusted = clip.Track == TimelineEngine.MainTrack
+                ? TimelineEngine.RestoreMainDuration(state, state.Version, clip.Id, desired)
+                : TimelineEngine.RestoreSecondaryDuration(state, state.Version, clip.Id, desired);
+            var clips = adjusted.State.Clips.Select(c => c.Id == clip.Id
+                ? c with { SourceStart = MediaTime.Zero } : c).ToArray();
+            var next = adjusted.State with { Clips = clips };
+            TimelineEngine.Validate(next);
+            return adjusted with { State = next };
+        }, refreshed);
     }
 
     /// <summary>Forget an unused reference without deleting its source file.</summary>

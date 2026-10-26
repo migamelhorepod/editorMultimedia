@@ -143,7 +143,7 @@ public sealed class MarkerTests
         var clip = C(0, 0, 8); var marker = M(2);
         var session = new TimelineSession(S(clip));
         session.Execute(s => TimelineEngine.AddMarker(s, s.Version, marker));
-        session.Execute(s => TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(9)));
+        session.Execute(s => TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(7)));
         session.Execute(s => TimelineEngine.MoveMarker(s, s.Version, marker.Id, T(4)));
         session.Undo();
         Assert.Equal(T(2), Assert.Single(session.Current.MarkerItems).At);
@@ -153,6 +153,6 @@ public sealed class MarkerTests
         Assert.Empty(session.Current.MarkerItems);
         session.Redo(); session.Redo(); session.Redo();
         Assert.Equal(T(4), Assert.Single(session.Current.MarkerItems).At);
-        Assert.Equal(T(9), session.Current.Find(clip.Id).Duration);
+        Assert.Equal(T(7), session.Current.Find(clip.Id).Duration);
     }
 }

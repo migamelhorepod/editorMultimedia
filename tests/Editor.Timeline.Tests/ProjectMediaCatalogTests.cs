@@ -15,7 +15,11 @@ public sealed class ProjectMediaCatalogTests
         {
             var path = Path.Combine(Folder, name);
             File.WriteAllBytes(path, [1, 2, 3, 4]);
-            return MediaReferences.InspectFile(path);
+            // These domain tests use synthetic metadata. MediaMetadataTests
+            // validates extraction from actual WAV and MP4 container bytes.
+            var asset = MediaReferences.InspectFile(path);
+            return asset.Kind is MediaKind.Audio or MediaKind.Video
+                ? asset with { DurationTicks = T(5).Ticks } : asset;
         }
         public void Dispose() => Directory.Delete(Folder, true);
     }
@@ -43,7 +47,7 @@ public sealed class ProjectMediaCatalogTests
     public void FirstVideoInEmptyProjectStartsAtZero()
     {
         using var tmp = new TempSource();
-        var asset = tmp.Make("first.mp4");
+        var asset = tmp.Make("first.mp4") with { DurationTicks = T(5).Ticks };
         var state = new TimelineState(0, Array.Empty<Clip>());
         var proposed = MediaReferences.PlanClip(state, asset, T(42), Guid.NewGuid());
         Assert.Equal(0, proposed.Track);
@@ -76,7 +80,7 @@ public sealed class ProjectMediaCatalogTests
     public void SameVideoCanBeReusedInMainTrackAfterExistingClips()
     {
         using var tmp = new TempSource();
-        var asset = tmp.Make("movie.mp4");
+        var asset = tmp.Make("movie.mp4") with { DurationTicks = T(5).Ticks };
         var state = SampleTimeline();
         var a = MediaReferences.PlanClip(state, asset, T(0), Guid.NewGuid());
         state = TimelineEngine.Insert(state, state.Version, a).State;
@@ -102,6 +106,31 @@ public sealed class ProjectMediaCatalogTests
         Assert.Equal(asset, Assert.Single(session.Media));
         session.Undo();
         Assert.DoesNotContain(session.Current.Clips, c => c.Id == clip.Id);
+    }
+
+    [Fact]
+    public void AClipCanBeDeletedButCatalogRemovalWaitsUntilEveryOccurrenceIsGone()
+    {
+        using var tmp = new TempSource();
+        var asset = tmp.Make("duplicated.wav");
+        var first = new Clip(Guid.NewGuid(), asset.Id, MediaKind.Audio, 1, T(0), T(3));
+        var second = new Clip(Guid.NewGuid(), asset.Id, MediaKind.Audio, 2, T(0), T(3));
+        var session = new TimelineSession(new TimelineState(0, [first, second]), [asset]);
+
+        Assert.Throws<MediaReferenceException>(() => session.RemoveUnusedMedia(asset.Id));
+        session.Execute(s => TimelineEngine.DeleteSecondary(s, s.Version, first.Id));
+        Assert.Single(session.Current.Clips);
+        Assert.Equal(asset, Assert.Single(session.Media));
+        Assert.Throws<MediaReferenceException>(() => session.RemoveUnusedMedia(asset.Id));
+
+        session.Execute(s => TimelineEngine.DeleteSecondary(s, s.Version, second.Id));
+        Assert.Empty(session.Current.Clips);
+        Assert.Equal(asset, Assert.Single(session.Media));
+        session.RemoveUnusedMedia(asset.Id);
+        Assert.Empty(session.Media);
+        Assert.True(File.Exists(asset.SourcePath));
+        session.Undo();
+        Assert.Equal(asset, Assert.Single(session.Media));
     }
 
     [Fact]

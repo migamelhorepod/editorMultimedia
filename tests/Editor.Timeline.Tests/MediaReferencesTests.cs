@@ -62,7 +62,7 @@ public sealed class MediaReferencesTests
     [Fact] public void SecondaryImportFindsFreeTrackAndAssociatesAutomatically()
     {
         using var tmp = new TempMedia();
-        var asset = MediaReferences.InspectFile(tmp.Create("audio.wav"));
+        var asset = MediaReferences.InspectFile(tmp.Create("audio.wav")) with { DurationTicks = T(5).Ticks };
         var state = Demo();
         var existing = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Image, 1, T(2), T(10));
         state = TimelineEngine.Insert(state, state.Version, existing).State;
@@ -78,7 +78,7 @@ public sealed class MediaReferencesTests
     [Fact] public void VideoImportAppendsToMainTrack()
     {
         using var tmp = new TempMedia();
-        var asset = MediaReferences.InspectFile(tmp.Create("camera.mov"));
+        var asset = MediaReferences.InspectFile(tmp.Create("camera.mov")) with { DurationTicks = T(5).Ticks };
         var state = Demo();
         var planned = MediaReferences.PlanClip(state, asset, T(2), Guid.NewGuid());
         Assert.Equal(0, planned.Track);
@@ -90,7 +90,7 @@ public sealed class MediaReferencesTests
     [Fact] public void FullSecondaryTracksRejectInsertionWithoutModifyingInput()
     {
         using var tmp = new TempMedia();
-        var asset = MediaReferences.InspectFile(tmp.Create("audio.mp3"));
+        var asset = MediaReferences.InspectFile(tmp.Create("audio.mp3")) with { DurationTicks = T(5).Ticks };
         var state = Demo();
         for (var lane = 1; lane < TimelineEngine.MaxTracks; lane++)
         {
@@ -107,13 +107,13 @@ public sealed class MediaReferencesTests
     [Fact] public void FormatV2RoundTripKeepsMediaReferences()
     {
         using var tmp = new TempMedia();
-        var asset = MediaReferences.InspectFile(tmp.Create("audio.mp3"));
+        var asset = MediaReferences.InspectFile(tmp.Create("audio.mp3")) with { DurationTicks = T(5).Ticks };
         var state = Demo();
         var clip = MediaReferences.PlanClip(state, asset, T(0), Guid.NewGuid());
         state = TimelineEngine.Insert(state, state.Version, clip).State;
         var project = new EditorProject(Guid.NewGuid(), "Importado", state, [asset]);
         var json = ProjectStore.Serialize(project);
-        Assert.Contains("\"formatVersion\": 2", json);
+        Assert.Contains("\"formatVersion\": 4", json);
         var loaded = ProjectStore.Deserialize(json);
         Assert.Equal(asset, Assert.Single(loaded.MediaItems));
         Assert.True(ProjectStore.SameContent(project, loaded));

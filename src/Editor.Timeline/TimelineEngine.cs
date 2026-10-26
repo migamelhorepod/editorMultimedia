@@ -16,7 +16,9 @@ public static partial class TimelineEngine
                 throw new TimelineException("INVALID_ID", "Missing or duplicate identifier.");
             if (c.Track is < 0 or >= MaxTracks || c.Start.Ticks < 0 || c.Duration.Ticks <= 0)
                 throw new TimelineException("INVALID_CLIP", "Invalid track, start or duration.");
-            try { _ = c.End; } catch (OverflowException) { throw new TimelineException("TIME_OVERFLOW", "Timeline time overflow."); }
+            try { _ = c.End; _ = c.SourceEnd; }
+            catch (OverflowException)
+            { throw new TimelineException("TIME_OVERFLOW", "Timeline or media source time overflow."); }
             if (c.Track == MainTrack && c.Association != AssociationKind.Independent)
                 throw new TimelineException("INVALID_MAIN_ASSOCIATION", "Main clips cannot be positioned.");
             if (c.Association == AssociationKind.Independent && (c.ParentId is not null || c.ParentOffset != MediaTime.Zero))
@@ -203,14 +205,27 @@ public static partial class TimelineEngine
         var current = state.Find(id);
         if (current.Track != MainTrack)
             throw new TimelineException("NOT_MAIN", "Clip is not on main track.");
-        if (requestedLeftEdge.Ticks < 0 || requestedLeftEdge.Ticks >= current.End.Ticks)
+        // For the *first* main clip the requested edge is a virtual source
+        // position: negative values can restore frames trimmed off its left
+        // side while the clip itself stays anchored to timeline time zero.
+        // The session checks the actual source start/end before committing.
+        // Later main clips cannot request a negative absolute timeline edge.
+        if ((current.Start.Ticks > 0 && requestedLeftEdge.Ticks < 0) ||
+            requestedLeftEdge.Ticks >= current.End.Ticks)
             throw new TimelineException("INVALID_RESIZE", "Left trim must preserve a positive duration.");
         if (requestedLeftEdge == current.Start)
             return Commit(state, state.Clips.ToList());
 
         // ReflowMain keeps every preceding clip unchanged and repositions only
         // the selected clip's right edge, subsequent clips and their children.
-        return ResizeMain(state, version, id, current.End - requestedLeftEdge);
+        var delta = requestedLeftEdge - current.Start;
+        var result = ResizeMain(state, version, id, current.End - requestedLeftEdge);
+        var clips = result.State.Clips.Select(c => c.Id == id
+            ? c with { SourceStart = current.Kind == MediaKind.Image ? current.SourceStart : current.SourceStart + delta }
+            : c).ToArray();
+        var updated = result.State with { Clips = clips };
+        Validate(updated);
+        return result with { State = updated };
     }
 
     /// <summary>
@@ -226,7 +241,12 @@ public static partial class TimelineEngine
         if (original.Track == MainTrack || start.Ticks < 0 || start.Ticks >= original.End.Ticks)
             throw new TimelineException("INVALID_RESIZE", "Secondary left trim requires a valid start before the end.");
         if (start == original.Start) return Commit(state, state.Clips.ToList());
-        var candidate = original with { Start = start, Duration = original.End - start };
+        var candidate = original with
+        {
+            Start = start, Duration = original.End - start,
+            SourceStart = original.Kind == MediaKind.Image ? original.SourceStart :
+                original.SourceStart + (start - original.Start)
+        };
         if (candidate.Association == AssociationKind.Positioned)
         {
             var parent = state.Clips.SingleOrDefault(c => c.Track == MainTrack &&
@@ -261,7 +281,11 @@ public static partial class TimelineEngine
         return ReflowMain(state, mains);
     }
 
-    /// <summary>Change main duration and ripple following main clips. Invalid associations become independent.</summary>
+    /// <summary>
+    /// Resize an occurrence on the primary timeline. For media-backed clips,
+    /// TimelineSession verifies that source start + duration does not exceed
+    /// the measured original source (including when re-extending a cut).
+    /// </summary>
     public static CommandResult ResizeMain(TimelineState state, long version, Guid id, MediaTime duration)
     {
         Check(state, version);
@@ -272,6 +296,10 @@ public static partial class TimelineEngine
         mains[index] = mains[index] with { Duration = duration };
         return ReflowMain(state, mains);
     }
+
+    /// <summary>Used for explicit recovery; source range is reset by TimelineSession.</summary>
+    public static CommandResult RestoreMainDuration(TimelineState state, long version, Guid id, MediaTime duration)
+        => ResizeMain(state, version, id, duration);
 
     private static CommandResult ReflowMain(TimelineState state, List<Clip> orderedMains)
     {
@@ -330,7 +358,10 @@ public static partial class TimelineEngine
         return new CommandResult(result.State, changed);
     }
 
-    /// <summary>Extend secondary. On collision move to first free secondary track; fail atomically if none.</summary>
+    /// <summary>
+    /// Change the secondary duration. Source bounds are checked by the session
+    /// when real source metadata is attached; images remain freely resizable.
+    /// </summary>
     public static CommandResult ResizeSecondary(TimelineState state, long version, Guid id, MediaTime duration)
     {
         Check(state, version);
@@ -349,6 +380,10 @@ public static partial class TimelineEngine
         return Commit(state, state.Clips.Select(x => x.Id == id ? candidate : x).ToList());
     }
 
+    /// <summary>Explicit recovery uses the same collision-safe timeline operation.</summary>
+    public static CommandResult RestoreSecondaryDuration(TimelineState state, long version, Guid id, MediaTime duration)
+        => ResizeSecondary(state, version, id, duration);
+
     /// <summary>Split a clip at an absolute time, retaining the original ID for the left half.
     /// The right half receives a new ID and inherits the same media and compatible metadata.
     /// For main clips, positioned secondaries whose starts fall in the right half are
@@ -365,7 +400,12 @@ public static partial class TimelineEngine
             throw new TimelineException("INVALID_SPLIT", "Split must be strictly inside the clip.");
 
         var leftDuration = at - original.Start;
-        var right = original with { Id = rightId, Start = at, Duration = original.End - at };
+        var right = original with
+        {
+            Id = rightId, Start = at, Duration = original.End - at,
+            SourceStart = original.Kind == MediaKind.Image ? original.SourceStart :
+                original.SourceStart + leftDuration
+        };
         if (original.Association == AssociationKind.Positioned)
             right = right with { ParentOffset = original.ParentOffset + leftDuration };
         var left = original with { Duration = leftDuration };

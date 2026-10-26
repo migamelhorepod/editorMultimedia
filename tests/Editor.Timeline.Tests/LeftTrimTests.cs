@@ -23,18 +23,15 @@ public sealed class LeftTrimTests
         Assert.Equal(2, result.Track);
     }
 
-    [Theory]
-    [InlineData(MediaKind.Video)]
-    [InlineData(MediaKind.Image)]
-    [InlineData(MediaKind.Audio)]
-    public void SecondaryCanExtendFromLeftForEveryMediaKind(MediaKind kind)
+    [Fact]
+    public void StillImageCanExtendFromLeft()
     {
-        var clip = C(3, 6, 4, kind);
+        var clip = C(3, 6, 4, MediaKind.Image);
         var after = TimelineEngine.TrimSecondaryLeft(S(clip), 0, clip.Id, T(2)).State.Find(clip.Id);
         Assert.Equal(T(2), after.Start);
         Assert.Equal(T(8), after.Duration);
         Assert.Equal(T(10), after.End);
-        Assert.Equal(kind, after.Kind);
+        Assert.Equal(MediaKind.Image, after.Kind);
     }
 
     [Fact] public void LeftTrimOfPositionedSecondaryUpdatesOffsetWithoutMovingParent()
@@ -70,7 +67,7 @@ public sealed class LeftTrimTests
     {
         var main = C(0, 0, 20);
         var audio = C(4, 7, 4, MediaKind.Audio);
-        var result = TimelineEngine.TrimSecondaryLeft(S(main, audio), 0, audio.Id, T(6)).State.Find(audio.Id);
+        var result = TimelineEngine.TrimSecondaryLeft(S(main, audio), 0, audio.Id, T(8)).State.Find(audio.Id);
         Assert.Equal(AssociationKind.Independent, result.Association);
         Assert.Null(result.ParentId);
         Assert.Equal(T(11), result.End);
@@ -78,7 +75,7 @@ public sealed class LeftTrimTests
 
     [Fact] public void LeftTrimMovesToAvailableTrackWhenExtensionCollides()
     {
-        var extending = C(3, 10, 4);
+        var extending = C(3, 10, 4, MediaKind.Image);
         var obstacle = C(3, 4, 5);
         var result = TimelineEngine.TrimSecondaryLeft(S(extending, obstacle), 0, extending.Id, T(7)).State;
         Assert.Equal(1, result.Find(extending.Id).Track);
@@ -89,7 +86,7 @@ public sealed class LeftTrimTests
 
     [Fact] public void NoFreeTrackBlocksSecondaryLeftTrimAtomically()
     {
-        var extending = C(1, 10, 4);
+        var extending = C(1, 10, 4, MediaKind.Image);
         var blockers = Enumerable.Range(1, 9).Select(lane => C(lane, 1, 8)).ToArray();
         var session = new TimelineSession(S([extending, ..blockers]));
         var error = Assert.Throws<TimelineException>(() => session.Execute(s =>
@@ -116,19 +113,18 @@ public sealed class LeftTrimTests
         TimelineEngine.Validate(state);
     }
 
-    [Fact] public void MainLeftTrimLeftwardDoesNotShrinkPreviousAndPushesFollowingRight()
+    [Fact] public void MainLeftTrimLeftwardCanRestoreTrimmedFramesAndPushFollowing()
     {
         var previous = C(0, 0, 8);
-        var selected = C(0, 8, 9);
+        var selected = C(0, 8, 9) with { SourceStart = T(3) };
         var following = C(0, 17, 7);
-        var state = TimelineEngine.TrimMainLeft(S(previous, selected, following), 0, selected.Id, T(6)).State;
-
-        Assert.Equal(previous, state.Find(previous.Id));
-        Assert.Equal(T(8), state.Find(selected.Id).Start);
-        Assert.Equal(T(11), state.Find(selected.Id).Duration);
-        Assert.Equal(T(19), state.Find(following.Id).Start);
-        Assert.Equal(T(26), state.Duration);
-        TimelineEngine.Validate(state);
+        var state = S(previous, selected, following);
+        var after = TimelineEngine.TrimMainLeft(state, 0, selected.Id, T(6)).State;
+        Assert.Equal(previous, after.Find(previous.Id));
+        Assert.Equal(T(11), after.Find(selected.Id).Duration);
+        Assert.Equal(T(1), after.Find(selected.Id).SourceStart);
+        Assert.Equal(T(19), after.Find(following.Id).Start);
+        Assert.Equal(following.Duration, after.Find(following.Id).Duration);
     }
 
     [Fact] public void MainLeftTrimDoesNotAffectPreviousParentOrItsPositionedMedia()
@@ -196,8 +192,8 @@ public sealed class LeftTrimTests
             Association = AssociationKind.Positioned, ParentId = following.Id, ParentOffset = T(1)
         };
         var blocker = C(1, 18, 3, MediaKind.Audio);
-        var after = TimelineEngine.TrimMainLeft(S(previous, selected, following, child, blocker), 0,
-            selected.Id, T(5)).State;
+        var after = TimelineEngine.RestoreMainDuration(S(previous, selected, following, child, blocker), 0,
+            selected.Id, T(8)).State;
 
         Assert.Equal(previous, after.Find(previous.Id));
         Assert.Equal(T(8), after.Find(selected.Id).Duration);
@@ -220,7 +216,7 @@ public sealed class LeftTrimTests
         var blockers = Enumerable.Range(1, 9).Select(lane => C(lane, 18, 3, MediaKind.Audio)).ToArray();
         var session = new TimelineSession(S([previous, selected, following, attached, ..blockers]));
         var error = Assert.Throws<TimelineException>(() => session.Execute(s =>
-            TimelineEngine.TrimMainLeft(s, s.Version, selected.Id, T(5))));
+            TimelineEngine.RestoreMainDuration(s, s.Version, selected.Id, T(8))));
         Assert.Equal("NO_FREE_TRACK", error.Code);
         Assert.Equal(T(8), session.Current.Find(previous.Id).Duration);
         Assert.Equal(T(5), session.Current.Find(selected.Id).Duration);
@@ -300,7 +296,7 @@ public sealed class LeftTrimTests
     [Fact] public void LeftTrimRejectsNonpositiveDurationsAndNegativeVirtualBoundary()
     {
         var first = C(0, 0, 8);
-        var second = C(0, 8, 9);
+        var second = C(0, 8, 9) with { SourceStart = T(8) };
         var secondary = C(3, 4, 3);
         var state = S(first, second, secondary);
         Assert.Equal("INVALID_RESIZE", Assert.Throws<TimelineException>(() =>
@@ -311,9 +307,13 @@ public sealed class LeftTrimTests
             TimelineEngine.TrimMainLeft(state, 0, second.Id, T(-1))).Code);
         Assert.Equal("INVALID_RESIZE", Assert.Throws<TimelineException>(() =>
             TimelineEngine.TrimMainLeft(state, 0, second.Id, T(17))).Code);
-        // t=0 is valid for a later clip and extends ONLY that clip.
-        var after = TimelineEngine.TrimMainLeft(state, 0, second.Id, T(0)).State;
-        Assert.Equal(first, after.Find(first.Id));
-        Assert.Equal(T(17), after.Find(second.Id).Duration);
+        // Pure-domain test: the caller's session validates physical source bounds.
+        // The main clip can be extended as a timeline operation and its source
+        // offset is moved accordingly.
+        var restored = TimelineEngine.TrimMainLeft(state, 0, second.Id, T(0)).State;
+        Assert.Equal(first, restored.Find(first.Id));
+        Assert.Equal(T(17), restored.Find(second.Id).Duration);
+        Assert.Equal(T(0), restored.Find(second.Id).SourceStart);
+        Assert.Equal(T(9), state.Find(second.Id).Duration);
     }
 }

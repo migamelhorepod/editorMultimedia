@@ -20,9 +20,12 @@ public sealed record Clip(
     AssociationKind Association = AssociationKind.Independent,
     Guid? ParentId = null, MediaTime ParentOffset = default,
     bool OrphanNotice = false,
-    string? EffectsToken = null)
+    string? EffectsToken = null,
+    MediaTime SourceStart = default,
+    bool SourceRangeVerified = false)
 {
     public MediaTime End => Start + Duration;
+    public MediaTime SourceEnd => SourceStart + Duration;
 }
 
 /// <summary>Timeline guide only: never a media source and never part of a clip association.</summary>

@@ -1,12 +1,13 @@
 namespace Editor.Timeline;
 
 /// <summary>Metadata referencing a user-selected local file. No media bytes are copied.</summary>
-public sealed record MediaAsset(Guid Id, MediaKind Kind, string DisplayName, string SourcePath, long SizeBytes);
+public sealed record MediaAsset(Guid Id, MediaKind Kind, string DisplayName, string SourcePath, long SizeBytes,
+    long? DurationTicks = null, int? PixelWidth = null, int? PixelHeight = null);
 
 public sealed class MediaReferenceException(string message) : Exception(message);
 
 /// <summary>Initial POC catalog, not the future IFileAccessService.
-/// Inspection does not decode codecs or discover intrinsic duration.</summary>
+/// Bounded MP4/MOV movie duration, WAV PCM/float, and PNG header inspection; no decoding.</summary>
 public static class MediaReferences
 {
     private static readonly Dictionary<string, MediaKind> Supported = new(StringComparer.OrdinalIgnoreCase)
@@ -39,7 +40,9 @@ public static class MediaReferences
         var info = new FileInfo(full);
         if (!info.Exists || info.Length == 0)
             throw new MediaReferenceException("Arquivo de mídia indisponível ou vazio.");
-        return new MediaAsset(Guid.NewGuid(), kind, info.Name, full, info.Length);
+        var metadata = MediaMetadataProbe.Read(full, kind);
+        return new MediaAsset(Guid.NewGuid(), kind, info.Name, full, info.Length,
+            metadata.DurationTicks, metadata.PixelWidth, metadata.PixelHeight);
     }
 
     /// <summary>Presence check on load/import/manual action, never periodic scanning.</summary>
@@ -71,6 +74,11 @@ public static class MediaReferences
         if (replacement.Kind != current.Kind)
             throw new MediaReferenceException(
                 "Selecione uma mídia do mesmo tipo (vídeo, áudio ou imagem).");
+        if (replacement.Kind is MediaKind.Video or MediaKind.Audio &&
+            replacement.DurationTicks is null)
+            throw new MediaReferenceException(
+                "Não foi possível medir a duração do novo arquivo. " +
+                "A referência anterior foi preservada.");
 
         if (catalog.Any(m => m.Id != mediaId &&
             SameSource(m.SourcePath, replacement.SourcePath)))
@@ -79,6 +87,30 @@ public static class MediaReferences
 
         var updated = catalog.ToArray();
         updated[index] = replacement with { Id = current.Id };
+        return updated;
+    }
+
+    /// <summary>
+    /// Re-read explicitly selected file metadata for an existing catalog entry.
+    /// The media ID and any existing timeline edits are left untouched.
+    /// </summary>
+    public static IReadOnlyList<MediaAsset> RefreshMetadata(
+        IReadOnlyList<MediaAsset> catalog, Guid mediaId)
+    {
+        var index = -1;
+        for (var i = 0; i < catalog.Count; i++)
+            if (catalog[i].Id == mediaId) { index = i; break; }
+        if (index < 0)
+            throw new MediaReferenceException("A mídia selecionada não está vinculada ao projeto.");
+
+        var previous = catalog[index];
+        if (!IsAvailable(previous))
+            throw new MediaReferenceException("A mídia está indisponível; relocalize-a antes de atualizar os dados.");
+        var current = InspectFile(previous.SourcePath) with { Id = previous.Id };
+        if (current.Kind != previous.Kind)
+            throw new MediaReferenceException("O tipo da mídia mudou e não pode ser atualizado.");
+        var updated = catalog.ToArray();
+        updated[index] = current;
         return updated;
     }
 
@@ -113,24 +145,92 @@ public static class MediaReferences
                 asset.SourcePath.Any(char.IsControl) || !Path.IsPathFullyQualified(asset.SourcePath) ||
                 !paths.Add(asset.SourcePath) || asset.SizeBytes <= 0 ||
                 !TryDetectKind(asset.SourcePath, out var kind) || kind != asset.Kind ||
-                Path.GetFileName(asset.SourcePath) != asset.DisplayName)
+                Path.GetFileName(asset.SourcePath) != asset.DisplayName ||
+                (asset.DurationTicks is long duration &&
+                    (asset.Kind is not (MediaKind.Audio or MediaKind.Video) ||
+                        duration <= 0 || duration > TimeSpan.FromDays(7).Ticks)) ||
+                (asset.PixelWidth.HasValue != asset.PixelHeight.HasValue) ||
+                (asset.PixelWidth.HasValue && (asset.Kind != MediaKind.Image ||
+                    asset.PixelWidth.Value is <= 0 or > 100000 ||
+                    asset.PixelHeight!.Value is <= 0 or > 100000)))
                 throw new MediaReferenceException("Arquivo ou identificador de mídia inválido ou duplicado.");
         }
         foreach (var clip in timeline.Clips)
         {
             var media = catalog.FirstOrDefault(m => m.Id == clip.MediaId);
-            if (media is not null && media.Kind != clip.Kind)
+            if (media is null) continue; // Historical demonstration clip without a physical source.
+            if (media.Kind != clip.Kind)
                 throw new MediaReferenceException("O tipo de mídia do clipe não corresponde ao arquivo registrado.");
+            if (clip.SourceStart.Ticks < 0)
+                throw new MediaReferenceException("O corte começa antes do início do arquivo original.");
+            if (clip.SourceRangeVerified &&
+                clip.Kind is (MediaKind.Audio or MediaKind.Video) &&
+                media.DurationTicks is null)
+                throw new MediaReferenceException(
+                    "Um clipe verificado precisa da duração da mídia original.");
+            if (clip.Kind == MediaKind.Image)
+            {
+                if (clip.SourceStart != MediaTime.Zero)
+                    throw new MediaReferenceException("Imagens não podem ter deslocamento temporal de origem.");
+            }
+            else if (clip.SourceRangeVerified && media.DurationTicks is long fullLength &&
+                     ((decimal)clip.SourceStart.Ticks + clip.Duration.Ticks > fullLength))
+                throw new MediaReferenceException("O clipe ultrapassa a duração do arquivo original.");
         }
     }
 
-    /// <summary>Placeholder durations until media probing in POC-002.</summary>
+    /// <summary>
+    /// Re-extending a cut is allowed within the original measured media range.
+    /// Shared by TimelineSession commits and WPF drag previews.
+    /// </summary>
+    public static void CheckSourceBounds(Clip clip, MediaAsset asset)
+    {
+        if (clip.Kind is not (MediaKind.Audio or MediaKind.Video) ||
+            asset.DurationTicks is not long measured) return;
+        if (clip.SourceStart.Ticks < 0 ||
+            (decimal)clip.SourceStart.Ticks + clip.Duration.Ticks > measured)
+            throw new MediaReferenceException(
+                "O corte ultrapassa o início ou fim do arquivo original. " +
+                "A alteração não foi aplicada.");
+    }
+
+    /// <summary>Checks new/edited time ranges without rewriting legacy clip edits.</summary>
+    public static TimelineState VerifyEditedRanges(
+        TimelineState before, TimelineState after, IReadOnlyList<MediaAsset> catalog)
+    {
+        var old = before.Clips.ToDictionary(c => c.Id);
+        var changed = false;
+        var clips = after.Clips.Select(c =>
+        {
+            var asset = catalog.FirstOrDefault(m => m.Id == c.MediaId);
+            if (asset is null || c.Kind == MediaKind.Image ||
+                asset.DurationTicks is not long) return c;
+            var rangeWasEdited = !old.TryGetValue(c.Id, out var prior) ||
+                c.SourceStart != prior.SourceStart || c.Duration != prior.Duration;
+            if (!rangeWasEdited) return c;
+
+            CheckSourceBounds(c, asset);
+            changed |= !c.SourceRangeVerified;
+            return c with { SourceRangeVerified = true };
+        }).ToArray();
+        return changed ? after with { Clips = clips } : after;
+    }
+
+    /// <summary>Temporal media needs measured duration; never insert five fake seconds.</summary>
     public static Clip PlanClip(TimelineState state, MediaAsset asset, MediaTime playhead, Guid clipId)
     {
         TimelineEngine.Validate(state);
         if (playhead.Ticks < 0 || clipId == Guid.Empty)
             throw new MediaReferenceException("Posição de inserção inválida.");
-        var duration = MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);
+        // Videos must enter the main track at their real source duration.
+        // Refuse unknown video duration instead of silently truncating to 5s.
+        if (asset.Kind is MediaKind.Video or MediaKind.Audio && asset.DurationTicks is null)
+            throw new MediaReferenceException(
+                "Não foi possível determinar a duração real da mídia temporal. " +
+                "Instale ou configure ffprobe para analisar formatos comprimidos; nenhum clipe foi inserido.");
+        var duration = asset.DurationTicks is long ticks
+            ? new MediaTime(ticks)
+            : MediaTime.FromSeconds(asset.Kind == MediaKind.Image ? 4 : 5);
         var start = asset.Kind == MediaKind.Video
             ? state.Clips.Where(c => c.Track == TimelineEngine.MainTrack)
                 .Select(c => c.End).DefaultIfEmpty(MediaTime.Zero).Max()
@@ -145,6 +245,7 @@ public static class MediaReferences
                 .DefaultIfEmpty(-1).First();
             if (track < 0) throw new TimelineException("NO_FREE_TRACK", "Nenhuma trilha secundária disponível.");
         }
-        return new Clip(clipId, asset.Id, asset.Kind, track, start, duration);
+        return new Clip(clipId, asset.Id, asset.Kind, track, start, duration,
+            SourceRangeVerified: asset.Kind is MediaKind.Audio or MediaKind.Video);
     }
 }

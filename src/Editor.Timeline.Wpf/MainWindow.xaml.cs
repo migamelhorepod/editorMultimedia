@@ -33,8 +33,15 @@ public partial class MainWindow : Window
     private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
     {
         public string Name => Asset.DisplayName;
-        public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
+        public string Details => $"{Asset.Kind} · {Usages} ocorrência(s) na timeline" +
             (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
+            (Asset.DurationTicks is long ticks
+                ? $" · {Timecode.Format(new MediaTime(ticks))} (duração original)"
+                : Asset.Kind is MediaKind.Audio or MediaKind.Video
+                    ? " · duração não aferida" : "") +
+            (Asset.PixelWidth is int width && Asset.PixelHeight is int height
+                ? $" · PNG {width}×{height}px"
+                : "") +
             $" · {Asset.SizeBytes / 1024.0:0.#} KB";
     }
     private bool hasUnsavedChanges;
@@ -142,7 +149,7 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or ProjectFileException or ArgumentException or NotSupportedException)
         {
-            MessageBox.Show(this, $"Não foi possível salvar o projeto. O estado atual foi preservado.\n\n{ex.Message}",
+            MessageBox.Show(this, $"Não foi possível salvar o projeto\n{ex.Message}",
                 "Falha ao salvar", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
@@ -152,7 +159,7 @@ public partial class MainWindow : Window
     {
         if (!hasUnsavedChanges) return true;
         var answer = MessageBox.Show(this,
-            "Existem alterações não salvas. Deseja salvar o projeto antes de continuar?",
+            "Existem alterações não salvas\nDeseja salvar o projeto antes de continuar?",
             "Alterações não salvas", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         return answer switch
         {
@@ -226,7 +233,7 @@ public partial class MainWindow : Window
             or ProjectFileException or ArgumentException or NotSupportedException)
         {
             MessageBox.Show(this,
-                $"Não foi possível abrir o projeto. O projeto atual não foi substituído.\n\n{ex.Message}",
+                $"Não foi possível abrir o projeto\n{ex.Message}",
                 "Falha ao abrir", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -245,7 +252,7 @@ public partial class MainWindow : Window
         var missing = availableMedia.Count(pair => !pair.Value);
         MessageBox.Show(this, missing == 0
             ? $"{mediaAssets.Count} mídias vinculadas; nenhuma indisponível nesta verificação."
-            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nSelecione um clipe indisponível e use Arquivo > Relocalizar mídia selecionada.",
+            : $"{missing} mídia(s) indisponível(is)\nSelecione um clipe indisponível e use Arquivo > Relocalizar mídia selecionada",
             "Verificação de mídias", MessageBoxButton.OK,
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
@@ -297,9 +304,7 @@ public partial class MainWindow : Window
         var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
-            $"{added} arquivo(s) vinculado(s) à timeline com duração provisória (vídeo/áudio: 5s; imagem: 4s)." +
-            duplicateMessage + issueText +
-            "\nOs arquivos originais não foram copiados nem alterados. A duração real ainda não foi analisada.",
+            $"{added} arquivo(s) vinculado(s) à timeline",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
@@ -345,14 +350,29 @@ public partial class MainWindow : Window
     private void UpdateCatalogActions()
     {
         if (InsertMediaButton is null || LocateMediaButton is null ||
-            RelinkMediaButton is null || RemoveMediaButton is null) return;
+            RelinkMediaButton is null || RemoveMediaButton is null ||
+            RefreshMetadataButton is null || FitSelectedClipButton is null) return;
         var item = MediaList?.SelectedItem as MediaListItem;
         var hasSelected = item is not null;
         var uses = item?.Usages ?? 0;
         InsertMediaButton.IsEnabled = hasSelected && !item!.Missing;
         LocateMediaButton.IsEnabled = uses > 0;
         RelinkMediaButton.IsEnabled = hasSelected;
+        RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
         RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
+        RemoveMediaButton.Content = !hasSelected
+            ? "Remover do catálogo"
+            : uses == 0
+                ? "Remover do catálogo (sem clipes)"
+                : $"Em uso: {uses} clipe(s) — não remover do catálogo";
+        RemoveMediaButton.ToolTip = !hasSelected
+            ? "Selecione uma mídia da biblioteca do projeto"
+            : uses == 0
+                ? "Remove a referência da biblioteca"
+                : $"Não é possível remover: {uses} clipe(s) ainda estão em uso na timeline";
+        var selectedClip = Selected();
+        FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
+            mediaAssets.Any(m => m.Id == selectedClip.MediaId);
     }
 
     private void MediaSearch_Changed(object sender, TextChangedEventArgs e)
@@ -386,7 +406,7 @@ public partial class MainWindow : Window
             availableMedia[asset.Id] = false;
             Draw();
             MessageBox.Show(this,
-                "Mídia indisponível. Relocalize a referência antes de inseri-la.",
+                "Mídia indisponível\nRelocalize a referência antes de inseri-la",
                 "Mídia indisponível", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -441,6 +461,48 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
+    {
+        var asset = CatalogSelection();
+        if (asset is null) return;
+        try
+        {
+            session.RefreshMediaMetadata(asset.Id);
+            mediaAssets = session.Media.ToList();
+            availableMedia[asset.Id] = MediaReferences.IsAvailable(asset);
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, ex.Message, "Não foi possível atualizar os dados",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void FitSelectedClip_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = Selected();
+        if (clip is null) return;
+        try
+        {
+            session.FitClipToSource(clip.Id);
+            mediaAssets = session.Media.ToList();
+            RefreshMediaPresence();
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+            IOException or UnauthorizedAccessException or ArgumentException or
+            NotSupportedException or OverflowException)
+        {
+            // Context-menu timeline actions do not interrupt the editor with
+            // dialogs. Failure is atomic; keep the source and current edits.
+            System.Diagnostics.Debug.WriteLine($"Restaurar duração original: {ex}");
+        }
+    }
+
     private void RelinkCatalogMedia_Click(object sender, RoutedEventArgs e)
     {
         var asset = CatalogSelection();
@@ -483,7 +545,7 @@ public partial class MainWindow : Window
             IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
         {
             MessageBox.Show(this,
-                $"Não foi possível relocalizar a mídia. A referência original foi preservada.\n\n{ex.Message}",
+                $"Não foi possível relocalizar a mídia, a referência original foi preservada\n{ex.Message}",
                 "Relocalização não realizada", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -553,7 +615,11 @@ public partial class MainWindow : Window
             var line = new Line { X1 = pos, X2 = pos, Y1 = RulerHeight - 5, Y2 = Surface.Height,
                 Stroke = Brush("#435064"), StrokeThickness = 0.6 };
             Surface.Children.Add(line);
-            AddText($"{second / 60:00}:{second % 60:00}", pos + 3, 10, Brush("#C6CFDC"), 11);
+            // Avoid overlapping labels on low zoom; keep seconds readable above 1 hour.
+            var rulerStep = Math.Max(5, (int)Math.Ceiling(95.0 / Scale / 5.0) * 5);
+            if (second % rulerStep == 0)
+                AddText(Timecode.Format(MediaTime.FromSeconds(second)),
+                    pos + 3, 10, Brush("#C6CFDC"), 11);
         }
         // Timeline markers are guides at absolute instants; they never shift when
         // clips are reorganized and they never affect clip overlap validation.
@@ -604,8 +670,8 @@ public partial class MainWindow : Window
             var content = new Grid();
             content.Children.Add(new TextBlock
             {
-                Text = linked is null ? $"{clip.Kind}  {clip.Duration.Seconds:0.#}s"
-                    : $"{linked.DisplayName}  {clip.Duration.Seconds:0.#}s",
+                Text = linked is null ? $"{clip.Kind}  {Timecode.Format(clip.Duration)}"
+                    : $"{linked.DisplayName}  {Timecode.Format(clip.Duration)}",
                 Foreground = Brushes.White,
                 Margin = new Thickness(7, 8, hasWarning ? 23 : 2, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -648,10 +714,18 @@ public partial class MainWindow : Window
                 BorderBrush = clip.Id == selectedId ? Brushes.White : hasWarning ? Brush("#F5BC53") : Brush("#708196"),
                 BorderThickness = new Thickness(clip.Id == selectedId || hasWarning ? 2 : 1),
                 Opacity = preview ? .72 : 1,
-                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração provisória {clip.Duration.Seconds}s" +
+                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {Timecode.Format(clip.Start)} | duração editada {Timecode.Format(clip.Duration)}" +
                     (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
+                    (linked is { Kind: MediaKind.Audio or MediaKind.Video }
+                        ? $"\nTrecho na fonte: {Timecode.Format(clip.SourceStart)} até {Timecode.Format(clip.SourceEnd)}" : "") +
+                    (linked?.DurationTicks is long originalTicks
+                        ? $"\nDuração original aferida: {Timecode.Format(new MediaTime(originalTicks))}"
+                        : linked is { Kind: MediaKind.Audio or MediaKind.Video }
+                            ? "\nDuração original não aferida — projeto legado" : "") +
+                    (linked?.PixelWidth is int width && linked?.PixelHeight is int height
+                        ? $"\nDimensões PNG: {width} × {height}px" : "") +
                     (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
-                    (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
+                    (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la" : ""),
                 Child = content
             };
             rect.Tag = clip.Id;
@@ -663,18 +737,18 @@ public partial class MainWindow : Window
         }
         var displayedResize = resizingClip && hasDragPreview && previewState is not null && draggingId is Guid resizingId
             ? previewState.Clips.FirstOrDefault(c => c.Id == resizingId) : null;
-        Status.Text = $"Projeto: {projectName}{(hasUnsavedChanges ? " (não salvo)" : "")} | Cursor {playheadSeconds:0.##}s | Versão {session.Current.Version} | {session.Current.Clips.Count} clipes | Duração {session.Current.Duration.Seconds:0.##}s | " +
+        Status.Text = $"Projeto: {projectName}{(hasUnsavedChanges ? " (não salvo)" : "")} | Cursor {Timecode.Format(MediaTime.FromSeconds((decimal)playheadSeconds))} | Versão {session.Current.Version} | {session.Current.Clips.Count} clipes | Duração {Timecode.Format(session.Current.Duration)} | " +
             (selected is not null ? Describe(selected) : "Selecione um clipe e arraste para mover.") +
             (resizingClip && hasDragPreview ? previewError is not null
-                ? $" | Prévia de redimensionamento indisponível: {previewError}"
-                : $" | Prévia: início {(displayedResize?.Start ?? resizePreviewStart).Seconds:0.0}s, duração {(displayedResize?.Duration ?? resizePreviewDuration).Seconds:0.0}s" +
+                ? ""
+                : $" | Prévia: início {Timecode.Format(displayedResize?.Start ?? resizePreviewStart)}, duração {Timecode.Format(displayedResize?.Duration ?? resizePreviewDuration)}" +
                   (resolvedPreviewTrack is int newTrack && newTrack != originalTrack
                       ? $" | Realocação: Trilha {newTrack + 1}" : "") : "") +
             (draggingMain && hasDragPreview ? previewError is not null
-                ? $" | Prévia indisponível: {previewError}"
+                ? ""
                 : $" | Nova posição principal: {previewMainIndex + 1}" : "") +
             (!draggingMain && hasDragPreview ? previewError == "NO_FREE_TRACK"
-                ? " | Sem trilha secundária disponível"
+                ? ""
                 : resolvedPreviewTrack is int lane && lane != dragPreviewTrack
                     ? $" | Realocação automática: Trilha {lane + 1}" : "" : "") +
             $" | Arquivos vinculados: {mediaAssets.Count} (indisponíveis: {availableMedia.Count(p => !p.Value)})" +
@@ -703,7 +777,7 @@ public partial class MainWindow : Window
         };
     }
 
-    private static string Describe(Clip c) => $"Selecionado: trilha {c.Track + 1}, {c.Start.Seconds:0.##}s, {c.Association}" +
+    private static string Describe(Clip c) => $"Selecionado: trilha {c.Track + 1}, {Timecode.Format(c.Start)}, {c.Association}" +
         (c.OrphanNotice ? " — vínculo perdido: mova a mídia para retirar o aviso" : "");
 
     private static Brush Brush(string hex) => (Brush)new BrushConverter().ConvertFromString(hex)!;
@@ -752,10 +826,7 @@ public partial class MainWindow : Window
     {
         var at = MediaTime.FromSeconds((decimal)Math.Round(playheadSeconds, 1));
         if (session.Current.MarkerItems.Any(m => m.At == at))
-        {
-            Status.Text = "Já existe um marcador nesta posição.";
             return;
-        }
         var taken = session.Current.MarkerItems.Select(m => m.Label).ToHashSet();
         var number = 1;
         while (taken.Contains($"Marcador {number}")) number++;
@@ -769,11 +840,7 @@ public partial class MainWindow : Window
         var nearest = session.Current.MarkerItems
             .Where(m => Math.Abs(m.At.Ticks - at.Ticks) <= 1_000_000) // 0.1s tolerance
             .OrderBy(m => Math.Abs(m.At.Ticks - at.Ticks)).FirstOrDefault();
-        if (nearest is null)
-        {
-            Status.Text = "Posicione o cursor sobre um marcador para removê-lo.";
-            return;
-        }
+        if (nearest is null) return;
         Run(s => TimelineEngine.RemoveMarker(s, s.Version, nearest.Id));
     }
 
@@ -832,12 +899,7 @@ public partial class MainWindow : Window
     {
         var clip = Selected();
         if (clip is null) return;
-        if (clip.Track == TimelineEngine.MainTrack)
-        {
-            MessageBox.Show(this, "Selecione uma mídia de uma trilha secundária para duplicar.",
-                "Duplicação indisponível", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
+        if (clip.Track == TimelineEngine.MainTrack) return;
         var newId = Guid.NewGuid();
         Run(s => TimelineEngine.DuplicateSecondary(s, s.Version, clip.Id, newId));
         if (session.Current.Clips.Any(c => c.Id == newId)) selectedId = newId;
@@ -850,11 +912,7 @@ public partial class MainWindow : Window
         if (clip is null) return;
         var at = MediaTime.FromSeconds((decimal)playheadSeconds);
         if (at.Ticks <= clip.Start.Ticks || at.Ticks >= clip.End.Ticks)
-        {
-            MessageBox.Show(this, "Posicione o cursor dentro do clipe selecionado para dividir.",
-                "Divisão indisponível", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
-        }
         Run(state => TimelineEngine.Split(state, state.Version, clip.Id, at, Guid.NewGuid()));
     }
 
@@ -926,8 +984,10 @@ public partial class MainWindow : Window
         // Right-click opens the clip menu. Left-click only selects or starts a drag.
         // Mark handled so the Canvas does not treat this gesture as another action.
         selectedId = id;
-        Draw();
-        ShowClipMenu(id);
+        // Keep the clicked visual alive until the popup closes. Rebuilding the
+        // Canvas here previously detached the Border under the mouse before
+        // the context menu could be displayed reliably.
+        ShowClipMenu(id, b);
         e.Handled = true;
     }
 
@@ -966,18 +1026,35 @@ public partial class MainWindow : Window
                 // a shared boundary: the previous clip must never change size.
                 // The selected clip retains its actual start, while its duration
                 // changes and the following clips ripple to the new positions.
-                // Trimming cannot create negative timeline time or zero duration.
-                var newStart = Math.Clamp(snapped, 0.0,
+                // The first main clip may extend its *virtual* source edge
+                // before timeline zero to recover previously trimmed footage.
+                // Its real timeline start stays at zero. Other left edges are
+                // limited by the source offset and never go before timeline zero.
+                var earliest = clip.Track == TimelineEngine.MainTrack &&
+                    clip.Start == MediaTime.Zero
+                    ? -Seconds(clip.SourceStart)
+                    : Math.Max(0.0, originalSeconds - Seconds(clip.SourceStart));
+                var newStart = Math.Clamp(snapped, earliest,
                     originalSeconds + Seconds(originalResizeDuration) - .1);
-                resizePreviewStart = MediaTime.FromSeconds((decimal)Math.Round(newStart, 1));
-                resizePreviewDuration = MediaTime.FromSeconds((decimal)Math.Round(
-                    originalSeconds + Seconds(originalResizeDuration) - newStart, 1));
+                // Clamp first, then preserve exact source-time precision. A
+                // second 0.1-second rounding could cross the measured boundary.
+                resizePreviewStart = MediaTime.FromSeconds((decimal)newStart);
+                resizePreviewDuration = clip.End - resizePreviewStart;
             }
             else
             {
-                // A 100ms lower bound avoids zero and negative media durations.
-                var seconds = Math.Max(.1, Math.Round((snapped - originalSeconds) * 10,
-                    MidpointRounding.AwayFromZero) / 10);
+                // The handle visibly stops at the *actual* last instant of
+                // audio/video rather than showing an invalid preview or popup.
+                var wanted = Math.Round((snapped - originalSeconds) * 10,
+                    MidpointRounding.AwayFromZero) / 10;
+                var source = session.Media.FirstOrDefault(m => m.Id == clip.MediaId);
+                var remainingSeconds = source?.DurationTicks is long fullTicks &&
+                    clip.Kind is (MediaKind.Audio or MediaKind.Video)
+                    ? Math.Max(0, (fullTicks - clip.SourceStart.Ticks) /
+                        (double)TimeSpan.TicksPerSecond)
+                    : double.PositiveInfinity;
+                var smallest = Math.Min(.1, remainingSeconds);
+                var seconds = Math.Clamp(wanted, smallest, remainingSeconds);
                 resizePreviewStart = originalResizeStart;
                 resizePreviewDuration = MediaTime.FromSeconds((decimal)seconds);
             }
@@ -994,6 +1071,14 @@ public partial class MainWindow : Window
                             clip.Id, resizePreviewDuration)
                         : TimelineEngine.PreviewResizeSecondary(session.Current, session.Current.Version,
                             clip.Id, resizePreviewDuration);
+                // Preview the same source-bound validation as the actual commit:
+                // invalid over-extensions must not appear to be valid while dragging.
+                // Only the resized occurrence changes its source interval.
+                // Check it directly rather than scanning the entire library
+                // during every pointer movement.
+                var source = session.Media.FirstOrDefault(m => m.Id == clip.MediaId);
+                if (source is not null)
+                    MediaReferences.CheckSourceBounds(preview.State.Find(clip.Id), source);
                 previewState = preview.State;
                 resolvedPreviewTrack = preview.State.Find(clip.Id).Track;
                 previewError = null;
@@ -1003,6 +1088,12 @@ public partial class MainWindow : Window
                 previewState = null;
                 resolvedPreviewTrack = null;
                 previewError = ex.Code;
+            }
+            catch (MediaReferenceException)
+            {
+                previewState = null;
+                resolvedPreviewTrack = null;
+                previewError = "SOURCE_BOUNDS";
             }
             catch (OverflowException)
             {
@@ -1224,7 +1315,6 @@ public partial class MainWindow : Window
                 if (session.Current.MarkerItems.Any(m => m.Id != markerId && m.At == movedTo))
                 {
                     playheadSeconds = Seconds(movedFrom);
-                    Status.Text = "Já existe um marcador nesta posição.";
                 }
                 else Run(s => TimelineEngine.MoveMarker(s, s.Version, markerId, movedTo));
             }
@@ -1283,29 +1373,36 @@ public partial class MainWindow : Window
         Draw();
     }
 
-    private void ShowClipMenu(Guid clipId)
+    private void ShowClipMenu(Guid clipId, Border clickedClip)
     {
         var clip = session.Current.Clips.FirstOrDefault(c => c.Id == clipId);
         if (clip is null) return;
         selectedId = clipId;
-        var menu = new ContextMenu { PlacementTarget = Surface,
+        var menu = new ContextMenu { PlacementTarget = clickedClip,
             Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        menu.Closed += (_, _) => Draw();
         var duplicate = MakeClipMenuItem("Duplicar", "copy", Duplicate_Click);
         duplicate.IsEnabled = clip.Track != TimelineEngine.MainTrack;
         menu.Items.Add(duplicate);
-        menu.Items.Add(MakeClipMenuItem("Excluir", "trash", Delete_Click));
+        menu.Items.Add(MakeClipMenuItem("Excluir este clipe da timeline", "trash", Delete_Click));
         var independent = MakeClipMenuItem("Tornar independente", "unlink", Independent_Click);
         independent.IsEnabled = clip.Track != TimelineEngine.MainTrack && clip.Association == AssociationKind.Positioned;
         menu.Items.Add(independent);
         var relink = MakeClipMenuItem("Relocalizar mídia...", "folder", RelinkSelectedMedia_Click);
         relink.IsEnabled = mediaAssets.Any(m => m.Id == clip.MediaId);
         menu.Items.Add(new Separator());
+        var restore = MakeClipMenuItem("Restaurar duração original do clipe", "clock", FitSelectedClip_Click);
+        restore.IsEnabled = clip.Kind is MediaKind.Video or MediaKind.Audio &&
+            mediaAssets.Any(m => m.Id == clip.MediaId);
+        restore.ToolTip = "Recupera todo o áudio/vídeo original e zera os cortes; Ctrl+Z pode desfazer.";
+        menu.Items.Add(restore);
         menu.Items.Add(relink);
         menu.IsOpen = true;
     }
 
     private static readonly Dictionary<string, string> MenuIconPaths = new()
     {
+        ["clock"] = "M896 128C472 128 128 472 128 896s344 768 768 768 768-344 768-768S1320 128 896 128zm0 1408c-353 0-640-287-640-640s287-640 640-640 640 287 640 640-287 640-640 640zm64-1024H832v448l352 211 64-105-288-170V512z",
         ["folder"] = "M1600 512H800L640 352H192Q128 352 128 416V1376Q128 1440 192 1440H1600Q1664 1440 1664 1376V576Q1664 512 1600 512Z",
         ["copy"] = "M1696 1152q40 0 68 -28t28 -68v-1216q0 -40 -28 -68t-68 -28h-960q-40 0 -68 28t-28 68v288h-544q-40 0 -68 28t-28 68v672q0 40 20 88t48 76l408 408q28 28 76 48t88 20h416q40 0 68 -28t28 -68v-328q68 40 128 40h416zM1152 939l-299 -299h299v299zM512 1323l-299 -299 h299v299zM708 676l316 316v416h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h512v256q0 40 20 88t48 76zM1664 -128v1152h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h896z",
         ["trash"] = "M512 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM768 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1024 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576 q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1152 76v948h-896v-948q0 -22 7 -40.5t14.5 -27t10.5 -8.5h832q3 0 10.5 8.5t14.5 27t7 40.5zM480 1152h448l-48 117q-7 9 -17 11h-317q-10 -2 -17 -11zM1408 1120v-64q0 -14 -9 -23t-23 -9h-96v-948q0 -83 -47 -143.5t-113 -60.5h-832 q-66 0 -113 58.5t-47 141.5v952h-96q-14 0 -23 9t-9 23v64q0 14 9 23t23 9h309l70 167q15 37 54 63t79 26h320q40 0 79 -26t54 -63l70 -167h309q14 0 23 -9t9 -23z",
@@ -1361,16 +1458,12 @@ public partial class MainWindow : Window
     private void Run(Func<TimelineState, CommandResult> operation)
     {
         try { session.Execute(operation); UpdateDirty(); }
-        catch (TimelineException ex)
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or OverflowException)
         {
-            // Uma colisão só gera aviso quando nenhuma das dez trilhas comporta a mídia.
-            var noAvailableTrack = ex.Code == "NO_FREE_TRACK";
-            var message = noAvailableTrack
-                ? "Não é possível criar mais trilhas\n\nConsidere realocar a mídia em uma trilha já existente"
-                : $"{ex.Code}: {ex.Message}";
-            MessageBox.Show(this, message, "Operação não permitida", MessageBoxButton.OK, MessageBoxImage.Warning);
+            // Timeline editing is non-interrupting: invalid operations are
+            // rejected atomically, without dialog boxes or undo entries.
+            System.Diagnostics.Debug.WriteLine($"Edição não aplicada: {ex}");
         }
-        catch (OverflowException) { MessageBox.Show(this, "Tempo excedeu o intervalo permitido.", "Erro", MessageBoxButton.OK, MessageBoxImage.Warning); }
         Draw();
     }
     private Clip? Selected() => selectedId is Guid id ? session.Current.Clips.FirstOrDefault(c => c.Id == id) : null;
