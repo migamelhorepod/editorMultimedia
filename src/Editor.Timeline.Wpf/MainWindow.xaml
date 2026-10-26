@@ -75,9 +75,14 @@
                     IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
             <Button x:Name="RefreshMetadataButton" Content="Atualizar dados"
                     Click="RefreshCatalogMetadata_Click"
-                    ToolTip="Ler novamente duração WAV ou dimensões PNG do arquivo selecionado"
+                    ToolTip="Ler novamente duração MP4/MOV/WAV ou dimensões PNG do arquivo selecionado"
                     IsEnabled="False" Padding="8,5" Margin="0,0,0,6"/>
           </WrapPanel>
+          <Button x:Name="FitSelectedClipButton" Content="Restaurar duração original do clipe"
+                  Click="FitSelectedClip_Click"
+                  ToolTip="Para um clipe de vídeo ou áudio selecionado na timeline: recupera a duração completa do arquivo, preservando os demais cortes"
+                  IsEnabled="False" Padding="8,5" Margin="0,0,0,6"
+                  HorizontalAlignment="Left"/>
           <Button x:Name="RemoveMediaButton" Content="Remover mídia não utilizada" Click="RemoveUnusedMedia_Click"
                   ToolTip="Não apaga o arquivo original; disponível só quando nenhum clipe usa a mídia"
                   IsEnabled="False" Padding="8,5" HorizontalAlignment="Left" Margin="0,0,0,4"/>

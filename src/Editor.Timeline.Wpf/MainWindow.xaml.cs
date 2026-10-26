@@ -36,7 +36,7 @@ public partial class MainWindow : Window
         public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
             (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
             (Asset.DurationTicks is long ticks
-                ? $" · WAV {TimeSpan.FromTicks(ticks).TotalSeconds:0.###}s (duração real)"
+                ? $" · {TimeSpan.FromTicks(ticks).TotalSeconds:0.###}s (duração real)"
                 : "") +
             (Asset.PixelWidth is int width && Asset.PixelHeight is int height
                 ? $" · PNG {width}×{height}px"
@@ -304,9 +304,10 @@ public partial class MainWindow : Window
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
             $"{added} arquivo(s) vinculado(s) à timeline. WAV PCM/float reconhecido usa duração real; " +
-            "outros áudios e vídeos usam 5s provisórios e imagens, 4s." +
+            "MP4/MOV reconhecidos também usam duração real. Áudios não medidos usam 5s; imagens, 4s. " +
+            "Vídeos sem duração identificada não são inseridos na timeline." +
             duplicateMessage + issueText +
-            "\nArquivos originais não foram copiados nem alterados. Cabeçalhos WAV/PNG são lidos sem decodificação.",
+            "\nArquivos originais não foram copiados nem alterados. Cabeçalhos WAV/PNG e MP4/MOV são analisados sem decodificar.",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
@@ -353,7 +354,7 @@ public partial class MainWindow : Window
     {
         if (InsertMediaButton is null || LocateMediaButton is null ||
             RelinkMediaButton is null || RemoveMediaButton is null ||
-            RefreshMetadataButton is null) return;
+            RefreshMetadataButton is null || FitSelectedClipButton is null) return;
         var item = MediaList?.SelectedItem as MediaListItem;
         var hasSelected = item is not null;
         var uses = item?.Usages ?? 0;
@@ -362,6 +363,9 @@ public partial class MainWindow : Window
         RelinkMediaButton.IsEnabled = hasSelected;
         RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
         RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
+        var selectedClip = Selected();
+        FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
+            mediaAssets.Any(m => m.Id == selectedClip.MediaId);
     }
 
     private void MediaSearch_Changed(object sender, TextChangedEventArgs e)
@@ -466,6 +470,30 @@ public partial class MainWindow : Window
             IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             MessageBox.Show(this, ex.Message, "Não foi possível atualizar os dados",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void FitSelectedClip_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = Selected();
+        if (clip is null) return;
+        try
+        {
+            session.FitClipToSource(clip.Id);
+            mediaAssets = session.Media.ToList();
+            RefreshMediaPresence();
+            UpdateDirty();
+            Draw();
+        }
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
+            IOException or UnauthorizedAccessException or ArgumentException or
+            NotSupportedException or OverflowException)
+        {
+            MessageBox.Show(this, ex is TimelineException { Code: "NO_FREE_TRACK" }
+                ? "Não é possível criar mais trilhas\n\nConsidere realocar a mídia em uma trilha já existente"
+                : ex.Message,
+                "Não foi possível restaurar a duração original",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -680,7 +708,7 @@ public partial class MainWindow : Window
                 ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração do clipe {clip.Duration.Seconds}s" +
                     (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
                     (linked?.DurationTicks is long originalTicks
-                        ? $"\nDuração WAV original aferida: {TimeSpan.FromTicks(originalTicks).TotalSeconds:0.###}s"
+                        ? $"\nDuração original aferida: {TimeSpan.FromTicks(originalTicks).TotalSeconds:0.###}s"
                         : linked is { Kind: MediaKind.Audio or MediaKind.Video }
                             ? "\nDuração original não aferida — inserção provisória" : "") +
                     (linked?.PixelWidth is int width && linked?.PixelHeight is int height
@@ -1336,11 +1364,16 @@ public partial class MainWindow : Window
         relink.IsEnabled = mediaAssets.Any(m => m.Id == clip.MediaId);
         menu.Items.Add(new Separator());
         menu.Items.Add(relink);
+        var restore = MakeClipMenuItem("Restaurar duração original", "clock", FitSelectedClip_Click);
+        restore.IsEnabled = clip.Kind is MediaKind.Video or MediaKind.Audio &&
+            mediaAssets.Any(m => m.Id == clip.MediaId);
+        menu.Items.Add(restore);
         menu.IsOpen = true;
     }
 
     private static readonly Dictionary<string, string> MenuIconPaths = new()
     {
+        ["clock"] = "M896 128C472 128 128 472 128 896s344 768 768 768 768-344 768-768S1320 128 896 128zm0 1408c-353 0-640-287-640-640s287-640 640-640 640 287 640 640-287 640-640 640zm64-1024H832v448l352 211 64-105-288-170V512z",
         ["folder"] = "M1600 512H800L640 352H192Q128 352 128 416V1376Q128 1440 192 1440H1600Q1664 1440 1664 1376V576Q1664 512 1600 512Z",
         ["copy"] = "M1696 1152q40 0 68 -28t28 -68v-1216q0 -40 -28 -68t-68 -28h-960q-40 0 -68 28t-28 68v288h-544q-40 0 -68 28t-28 68v672q0 40 20 88t48 76l408 408q28 28 76 48t88 20h416q40 0 68 -28t28 -68v-328q68 40 128 40h416zM1152 939l-299 -299h299v299zM512 1323l-299 -299 h299v299zM708 676l316 316v416h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h512v256q0 40 20 88t48 76zM1664 -128v1152h-384v-416q0 -40 -28 -68t-68 -28h-416v-640h896z",
         ["trash"] = "M512 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM768 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1024 800v-576q0 -14 -9 -23t-23 -9h-64q-14 0 -23 9t-9 23v576 q0 14 9 23t23 9h64q14 0 23 -9t9 -23zM1152 76v948h-896v-948q0 -22 7 -40.5t14.5 -27t10.5 -8.5h832q3 0 10.5 8.5t14.5 27t7 40.5zM480 1152h448l-48 117q-7 9 -17 11h-317q-10 -2 -17 -11zM1408 1120v-64q0 -14 -9 -23t-23 -9h-96v-948q0 -83 -47 -143.5t-113 -60.5h-832 q-66 0 -113 58.5t-47 141.5v952h-96q-14 0 -23 9t-9 23v64q0 14 9 23t23 9h309l70 167q15 37 54 63t79 26h320q40 0 79 -26t54 -63l70 -167h309q14 0 23 -9t9 -23z",
