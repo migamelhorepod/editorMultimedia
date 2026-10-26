@@ -43,7 +43,7 @@ public sealed class ProjectMediaCatalogTests
     public void FirstVideoInEmptyProjectStartsAtZero()
     {
         using var tmp = new TempSource();
-        var asset = tmp.Make("first.mp4");
+        var asset = tmp.Make("first.mp4") with { DurationTicks = T(5).Ticks };
         var state = new TimelineState(0, Array.Empty<Clip>());
         var proposed = MediaReferences.PlanClip(state, asset, T(42), Guid.NewGuid());
         Assert.Equal(0, proposed.Track);
@@ -76,7 +76,7 @@ public sealed class ProjectMediaCatalogTests
     public void SameVideoCanBeReusedInMainTrackAfterExistingClips()
     {
         using var tmp = new TempSource();
-        var asset = tmp.Make("movie.mp4");
+        var asset = tmp.Make("movie.mp4") with { DurationTicks = T(5).Ticks };
         var state = SampleTimeline();
         var a = MediaReferences.PlanClip(state, asset, T(0), Guid.NewGuid());
         state = TimelineEngine.Insert(state, state.Version, a).State;

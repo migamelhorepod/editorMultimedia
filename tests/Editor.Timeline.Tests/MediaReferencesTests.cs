@@ -78,7 +78,7 @@ public sealed class MediaReferencesTests
     [Fact] public void VideoImportAppendsToMainTrack()
     {
         using var tmp = new TempMedia();
-        var asset = MediaReferences.InspectFile(tmp.Create("camera.mov"));
+        var asset = MediaReferences.InspectFile(tmp.Create("camera.mov")) with { DurationTicks = T(5).Ticks };
         var state = Demo();
         var planned = MediaReferences.PlanClip(state, asset, T(2), Guid.NewGuid());
         Assert.Equal(0, planned.Track);

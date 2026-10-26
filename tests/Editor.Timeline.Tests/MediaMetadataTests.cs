@@ -271,4 +271,203 @@ public sealed class MediaMetadataTests
         Assert.False(session.CanUndo);
     }
 
+
+    private static byte[] IsoBox(string type, byte[] payload, bool extended = false)
+    {
+        var headerSize = extended ? 16 : 8;
+        var bytes = new byte[headerSize + payload.Length];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(0, 4),
+            extended ? 1u : (uint)bytes.Length);
+        Encoding.ASCII.GetBytes(type).CopyTo(bytes, 4);
+        if (extended)
+            BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(8, 8), (ulong)bytes.Length);
+        payload.CopyTo(bytes, headerSize);
+        return bytes;
+    }
+
+    private static byte[] Mp4File(uint timescale, ulong duration, bool version1 = false,
+        bool movieAtEnd = false, bool extendedMoov = false, bool ftyp = true)
+    {
+        var mvhd = new byte[version1 ? 32 : 20];
+        mvhd[0] = version1 ? (byte)1 : (byte)0;
+        if (version1)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(mvhd.AsSpan(20, 4), timescale);
+            BinaryPrimitives.WriteUInt64BigEndian(mvhd.AsSpan(24, 8), duration);
+        }
+        else
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(mvhd.AsSpan(12, 4), timescale);
+            BinaryPrimitives.WriteUInt32BigEndian(mvhd.AsSpan(16, 4), checked((uint)duration));
+        }
+        var moov = IsoBox("moov", IsoBox("mvhd", mvhd), extendedMoov);
+        var branding = IsoBox("ftyp", "isom0000"u8.ToArray());
+        var data = movieAtEnd ? IsoBox("mdat", new byte[256 * 1024]) : Array.Empty<byte>();
+        var parts = new List<byte[]>();
+        if (ftyp) parts.Add(branding);
+        if (movieAtEnd) parts.Add(data);
+        parts.Add(moov);
+        return parts.SelectMany(x => x).ToArray();
+    }
+
+    [Fact]
+    public void Mp4ElevenMinutesFortyFourSecondsIsInsertedWithoutAutomaticTrim()
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(
+            temp.Create("2026-10-11 20-42-34.mp4", Mp4File(1000, 704000)));
+        Assert.Equal(MediaTime.FromSeconds(704).Ticks, video.DurationTicks);
+        Assert.Equal(MediaKind.Video, video.Kind);
+        var timeline = new TimelineState(0, Array.Empty<Clip>());
+        var planned = MediaReferences.PlanClip(timeline, video,
+            MediaTime.Zero, Guid.NewGuid());
+        Assert.Equal(0, planned.Track);
+        Assert.Equal(MediaTime.FromSeconds(704), planned.Duration);
+        var inserted = TimelineEngine.Insert(timeline, timeline.Version, planned).State;
+        Assert.Equal(MediaTime.FromSeconds(704), inserted.Duration);
+        var saved = new EditorProject(Guid.NewGuid(), "Vídeo inteiro", inserted, [video]);
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(saved));
+        Assert.Equal(MediaTime.FromSeconds(704), Assert.Single(loaded.Timeline.Clips).Duration);
+        Assert.Equal(video.DurationTicks, Assert.Single(loaded.MediaItems).DurationTicks);
+    }
+
+    [Theory]
+    [InlineData(11000u, 1000u, 11)]
+    [InlineData(704000u, 1000u, 704)]
+    [InlineData(704500u, 1000u, 704)]
+    public void VideoMp4DurationDoesNotDefaultToFiveSeconds(
+        uint duration, uint timescale, int integralPart)
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(temp.Create("video.mp4",
+            Mp4File(timescale, duration)));
+        Assert.NotNull(video.DurationTicks);
+        Assert.True(video.DurationTicks > MediaTime.FromSeconds(5).Ticks);
+        Assert.InRange(video.DurationTicks!.Value,
+            MediaTime.FromSeconds(integralPart).Ticks,
+            MediaTime.FromSeconds(integralPart + 1).Ticks);
+    }
+
+    [Fact]
+    public void Mp4MoovAtEndAndLargeMdatAreHandledWithoutDecoding()
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(temp.Create("huge.mp4",
+            Mp4File(1000, 704000, movieAtEnd: true)));
+        Assert.Equal(MediaTime.FromSeconds(704).Ticks, video.DurationTicks);
+    }
+
+    [Fact]
+    public void ExtendedMoovBoxAndVersionOneMovieHeaderAreSupported()
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(temp.Create("large.mp4",
+            Mp4File(1000000, 704000000, version1: true, extendedMoov: true)));
+        Assert.Equal(MediaTime.FromSeconds(704).Ticks, video.DurationTicks);
+    }
+
+    [Fact]
+    public void MovWithoutFtypCanContainQuickTimeMovieHeader()
+    {
+        using var temp = new TemporaryFiles();
+        var movie = MediaReferences.InspectFile(temp.Create("classic.mov",
+            Mp4File(1000, 11000, ftyp: false)));
+        Assert.Equal(MediaTime.FromSeconds(11).Ticks, movie.DurationTicks);
+    }
+
+    [Theory]
+    [InlineData("broken.mp4")]
+    [InlineData("broken.mov")]
+    [InlineData("broken.mkv")]
+    public void VideoWithoutMeasuredDurationIsNotSilentlyTrimmedToFiveSeconds(string filename)
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(temp.Create(filename, [1, 2, 3, 4]));
+        Assert.Null(video.DurationTicks);
+        var state = new TimelineState(0, Array.Empty<Clip>());
+        Assert.Throws<MediaReferenceException>(() =>
+            MediaReferences.PlanClip(state, video, MediaTime.Zero, Guid.NewGuid()));
+        Assert.Empty(state.Clips);
+    }
+
+    [Fact]
+    public void InvalidMovieTimescaleAndTruncatedBoxCannotForgeDuration()
+    {
+        using var temp = new TemporaryFiles();
+        var badScale = MediaReferences.InspectFile(temp.Create("scale.mp4",
+            Mp4File(0, 11000)));
+        Assert.Null(badScale.DurationTicks);
+        var truncated = Mp4File(1000, 11000);
+        truncated = truncated[..^7];
+        var badHeader = MediaReferences.InspectFile(temp.Create("truncated.mp4", truncated));
+        Assert.Null(badHeader.DurationTicks);
+    }
+
+    [Fact]
+    public void MovieDurationCanBeMeasuredForExistingCatalogWithoutChangingTrims()
+    {
+        using var temp = new TemporaryFiles();
+        var source = MediaReferences.InspectFile(
+            temp.Create("video.mp4", Mp4File(1000, 704000)));
+        var legacy = source with { DurationTicks = null };
+        var clip = new Clip(Guid.NewGuid(), legacy.Id,
+            MediaKind.Video, 0, MediaTime.Zero, MediaTime.FromSeconds(5));
+        var before = new TimelineState(0, [clip]);
+        var session = new TimelineSession(before, [legacy]);
+
+        session.RefreshMediaMetadata(legacy.Id);
+        Assert.Equal(MediaTime.FromSeconds(704).Ticks, Assert.Single(session.Media).DurationTicks);
+        Assert.Equal(MediaTime.FromSeconds(5), session.Current.Find(clip.Id).Duration);
+        session.Undo();
+        Assert.Null(Assert.Single(session.Media).DurationTicks);
+        session.Redo();
+        Assert.Equal(source.DurationTicks, Assert.Single(session.Media).DurationTicks);
+
+        var following = MediaReferences.PlanClip(session.Current, session.Media[0],
+            MediaTime.Zero, Guid.NewGuid());
+        Assert.Equal(MediaTime.FromSeconds(5), following.Start);
+        Assert.Equal(MediaTime.FromSeconds(704), following.Duration);
+    }
+
+    [Fact]
+    public void MainTrackAppendsFullDurationForSuccessiveVideos()
+    {
+        using var temp = new TemporaryFiles();
+        var video = MediaReferences.InspectFile(temp.Create("long.mp4",
+            Mp4File(1000, 704000)));
+        var state = new TimelineState(0, Array.Empty<Clip>());
+        for (var i = 0; i < 2; i++)
+        {
+            var next = MediaReferences.PlanClip(state, video,
+                MediaTime.Zero, Guid.NewGuid());
+            state = TimelineEngine.Insert(state, state.Version, next).State;
+        }
+        var ordered = state.Clips.OrderBy(x => x.Start.Ticks).ToArray();
+        Assert.Equal(MediaTime.FromSeconds(704), ordered[0].Duration);
+        Assert.Equal(MediaTime.FromSeconds(704), ordered[1].Start);
+        Assert.Equal(MediaTime.FromSeconds(1408), state.Duration);
+    }
+
+    [Fact]
+    public void VideoMetadataPersistedInFormatV3AndLegacyV2StillLoads()
+    {
+        using var temp = new TemporaryFiles();
+        var source = MediaReferences.InspectFile(temp.Create("original.mp4",
+            Mp4File(1000, 704000)));
+        var project = new EditorProject(Guid.NewGuid(), "Video source",
+            new TimelineState(0, Array.Empty<Clip>()), [source]);
+        var json = JsonNode.Parse(ProjectStore.Serialize(project))!.AsObject();
+        Assert.Equal(3, (int)json["formatVersion"]!);
+        Assert.Equal(source.DurationTicks, (long)json["media"]![0]!["durationTicks"]!);
+        var loaded = ProjectStore.Deserialize(json.ToJsonString());
+        Assert.Equal(source, Assert.Single(loaded.MediaItems));
+
+        json["formatVersion"] = 2;
+        json["media"]![0]!.AsObject().Remove("durationTicks");
+        json["media"]![0]!.AsObject().Remove("pixelWidth");
+        json["media"]![0]!.AsObject().Remove("pixelHeight");
+        var legacy = ProjectStore.Deserialize(json.ToJsonString());
+        Assert.Null(Assert.Single(legacy.MediaItems).DurationTicks);
+    }
+
 }
