@@ -364,6 +364,11 @@ public partial class MainWindow : Window
         RelinkMediaButton.IsEnabled = hasSelected;
         RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
         RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
+        RemoveMediaButton.Content = !hasSelected
+            ? "Remover do catálogo"
+            : uses == 0
+                ? "Remover do catálogo (sem clipes)"
+                : $"Em uso: {uses} clipe(s) — não remover do catálogo";
         RemoveMediaButton.ToolTip = !hasSelected
             ? "Selecione uma mídia no catálogo do projeto."
             : uses == 0

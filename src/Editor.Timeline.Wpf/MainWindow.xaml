@@ -83,7 +83,8 @@
                   ToolTip="Para um clipe de vídeo ou áudio selecionado na timeline: recupera a duração completa do arquivo, preservando os demais cortes"
                   IsEnabled="False" Padding="8,5" Margin="0,0,0,6"
                   HorizontalAlignment="Left"/>
-          <Button x:Name="RemoveMediaButton" Content="Remover do catálogo (0 clipes)" Click="RemoveUnusedMedia_Click"
+          <Button x:Name="RemoveMediaButton" Content="Remover do catálogo" Click="RemoveUnusedMedia_Click"
+                  ToolTipService.ShowOnDisabled="True"
                   ToolTip="Exclui somente a referência do catálogo. Não apaga clipes na timeline nem o arquivo original."
                   IsEnabled="False" Padding="8,5" HorizontalAlignment="Left" Margin="0,0,0,4"/>
           <TextBlock x:Name="MediaSummary" Text="0 mídias" Foreground="#B5C0D2" Margin="0,6,0,0" FontSize="11"/>

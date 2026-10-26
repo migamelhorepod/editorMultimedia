@@ -16,10 +16,10 @@
 | Imagem | Uma imagem estática permanece com duração editável inicial de 4 s; não possui recorte de origem temporal. |
 | Tempo visual | Apresentar `HH:MM:SS[,fff]` no catálogo, timeline, régua e barra de status. Não arredondar valores persistidos. |
 | Fonte e clipe | `SourceStart` = início real dentro do arquivo; `Duration` = extensão temporal da ocorrência; `SourceEnd` = soma exata. |
-| Corte à esquerda | Consumir quadros/amostras a partir do começo da fonte; novo `SourceStart` avança, `Duration` encurta. Não esticar áudio ou vídeo. |
-| Corte à direita | `SourceStart` não muda; só é permitido **encurtar** áudio e vídeo. Imagens estáticas podem ter o tempo de exibição aumentado ou diminuído. |
+| Corte à esquerda | Ao encurtar, avança `SourceStart`; ao alongar um clipe já cortado, recua `SourceStart` até o mínimo de zero, sem ultrapassar a fonte. |
+| Corte à direita | `SourceStart` não muda. Áudio/vídeo podem ser encurtados e alongados novamente, respeitando `SourceStart + Duration ≤ duração original`. Imagens possuem duração livremente editável. |
 | Divisão | Clipes resultantes usam intervalos de origem contíguos, sem recomeçar o lado direito em 00:00. |
-| Restauração da fonte | Única exceção para recuperar a duração cortada: comando explícito **Restaurar duração original** (clique direito), que zera `SourceStart` e recupera a duração total aferida; aplica ondulação à principal. |
+| Restauração da fonte | **Restaurar duração original do clipe**, no clique direito do clipe na timeline, zera `SourceStart`, recupera a duração integral aferida e aplica ondulação à principal, com Ctrl+Z/Y. |
 | Associação | Posicionadas acompanham pai; independentes ficam em tempo absoluto. Avisos de vínculo perdido persistem até movimento. |
 | Colisão | Tenta outra trilha secundária; se todas ocupadas, erro e alteração atômica (mensagem existente). |
 | Histórico | Todas as operações mutantes acima integram Ctrl+Z/Y com uma etapa por gesto/comando. |
@@ -75,15 +75,15 @@ Marque cada caso após exercitar o aplicativo. A homologação exige que todos o
 - [ ] Importar imagem; duração inicial 4 s, alterar sua duração e dividir, sem `SourceStart` diferente de zero.
 - [ ] Cortar 2 s da esquerda de um vídeo, conferir início na fonte e duração. Cortar à direita não altera início na fonte.
 - [ ] Dividir o vídeo, conferir que o segundo clipe começa no instante correspondente na fonte e que o total da timeline permanece coerente.
-- [ ] Encurtar áudio e vídeo pela esquerda e direita; tentar aumentá-los mesmo **dentro da duração original**, por qualquer borda. Deve recusar sem criar histórico. Imagens estáticas ainda podem ser esticadas para aumentar o tempo de exibição.
-- [ ] Usar clique direito > **Restaurar duração original** num clipe encurtado, verificando duração real, posição da origem, ondulação e Ctrl+Z/Y.
+- [ ] Encurtar áudio e vídeo pelas duas bordas; alongar novamente **dentro da fonte** deve funcionar. Tentar ultrapassar início/fim real deve recusar sem criar histórico. Imagens estáticas mantêm duração livre.
+- [ ] Clique direito num clipe de áudio/vídeo > **Restaurar duração original do clipe**, verificando duração total, origem zero, ondulação e Ctrl+Z/Y.
 - [ ] Reordenar principais; mídias posicionadas acompanham seu pai e independentes permanecem em tempo absoluto.
 - [ ] Provocar colisão com múltiplas secundárias; verificar realocação para a primeira trilha livre. Com todas as 9 ocupadas, deve mostrar aviso e não alterar estado.
 - [ ] Criar, arrastar e remover marcador; usar as setas e zoom; encaixe inicia **desligado**.
 - [ ] Salvar projeto, fechar e reabrir. Conferir catálogo, durações, offsets de fonte, efeitos representados, vínculos e marcadores.
 - [ ] Abrir um projeto antigo em formatos v1, v2 e v3; a abertura deve preservar os clipes. Ao salvar novamente, o arquivo passa a formato v4.
 - [ ] Mover arquivo original no Explorer, verificar **Mídia indisponível**, relocalizar pelo seletor e conferir preservação de IDs e edições.
-- [ ] Corrigir um clipe legado que veio com 5 s usando **Restaurar duração original**; verificar ondulação dos clipes seguintes e `Ctrl+Z`/`Ctrl+Y`.
+- [ ] Corrigir um clipe legado de 5 s pelo clique direito > **Restaurar duração original do clipe** e conferir `Ctrl+Z`/`Ctrl+Y`.
 - [ ] Cancelar Salvar como e fechar com alterações pendentes; projeto não é descartado. Corromper um JSON de teste e tentar abrir; a edição corrente permanece.
 - [ ] Abrir Pull Request, observar build WPF e testes no GitHub Actions; nenhuma falha ou warning de compilação/testes .NET.
 
