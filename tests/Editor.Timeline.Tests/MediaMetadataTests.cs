@@ -470,4 +470,70 @@ public sealed class MediaMetadataTests
         Assert.Null(Assert.Single(legacy.MediaItems).DurationTicks);
     }
 
+
+    [Fact]
+    public void RestoreFullVideoDurationRipplesNextMainAndAttachedMediaAndIsUndoable()
+    {
+        using var temp = new TemporaryFiles();
+        var physical = MediaReferences.InspectFile(temp.Create(
+            "2026-10-11 20-42-34.mp4", Mp4File(1000, 704000)));
+        var oldReference = physical with { DurationTicks = null };
+        var first = new Clip(Guid.NewGuid(), oldReference.Id, MediaKind.Video,
+            0, MediaTime.Zero, MediaTime.FromSeconds(5));
+        var second = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Video,
+            0, MediaTime.FromSeconds(5), MediaTime.FromSeconds(9));
+        var linked = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Audio,
+            1, MediaTime.FromSeconds(7), MediaTime.FromSeconds(2),
+            AssociationKind.Positioned, second.Id, MediaTime.FromSeconds(2));
+        var independent = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Image,
+            2, MediaTime.FromSeconds(50), MediaTime.FromSeconds(4));
+        var state = new TimelineState(0, [first, second, linked, independent]);
+        TimelineEngine.Validate(state);
+        var session = new TimelineSession(state, [oldReference]);
+
+        session.FitClipToSource(first.Id);
+        Assert.Equal(MediaTime.FromSeconds(704), session.Current.Find(first.Id).Duration);
+        Assert.Equal(MediaTime.FromSeconds(704), session.Current.Find(second.Id).Start);
+        Assert.Equal(MediaTime.FromSeconds(706), session.Current.Find(linked.Id).Start);
+        Assert.Equal(MediaTime.FromSeconds(50), session.Current.Find(independent.Id).Start);
+        Assert.Equal(physical.DurationTicks, Assert.Single(session.Media).DurationTicks);
+        TimelineEngine.Validate(session.Current);
+
+        session.Undo();
+        Assert.Same(state, session.Current);
+        Assert.Null(Assert.Single(session.Media).DurationTicks);
+        session.Redo();
+        Assert.Equal(MediaTime.FromSeconds(704), session.Current.Find(first.Id).Duration);
+        Assert.Equal(MediaTime.FromSeconds(706), session.Current.Find(linked.Id).Start);
+    }
+
+    [Fact]
+    public void RestoreRealLengthOnAlreadyCorrectVideoIsNoOp()
+    {
+        using var temp = new TemporaryFiles();
+        var source = MediaReferences.InspectFile(temp.Create("ok.mp4",
+            Mp4File(1000, 704000)));
+        var clip = new Clip(Guid.NewGuid(), source.Id, MediaKind.Video,
+            0, MediaTime.Zero, MediaTime.FromSeconds(704));
+        var session = new TimelineSession(new TimelineState(0, [clip]), [source]);
+        session.FitClipToSource(clip.Id);
+        Assert.False(session.CanUndo);
+        Assert.Equal(source, Assert.Single(session.Media));
+    }
+
+    [Fact]
+    public void RestoreDurationOfUnmeasurableVideoFailsWithoutModifyingClip()
+    {
+        using var temp = new TemporaryFiles();
+        var bad = MediaReferences.InspectFile(temp.Create("unsupported.mkv", [1, 2, 3]));
+        var clip = new Clip(Guid.NewGuid(), bad.Id, MediaKind.Video,
+            0, MediaTime.Zero, MediaTime.FromSeconds(5));
+        var state = new TimelineState(0, [clip]);
+        var session = new TimelineSession(state, [bad]);
+        Assert.Throws<MediaReferenceException>(() => session.FitClipToSource(clip.Id));
+        Assert.Same(state, session.Current);
+        Assert.Equal(bad, Assert.Single(session.Media));
+        Assert.False(session.CanUndo);
+    }
+
 }

@@ -3,8 +3,8 @@
 **Windows · C# · .NET 10 · WPF · VS Code · GitHub**. A última versão estável integrada à `main` é a **v6.3**. A proposta v6.4 fica em Pull Request até a validação manual.
 
 - **v6.3 (estável):** catálogo do projeto com busca e filtros, referências reutilizáveis, projetos vazios, relocalização de mídias, undo/redo integrado e salvamento manual.
-- **v6.4 (proposta):** duração real de WAV PCM/IEEE float compatível para novas inserções, dimensões de PNG, atualização manual de metadados de projetos antigos, persistência em `.emproj.json` v3. Veja [o roteiro completo](docs/POC-001-media-v6.4.md).
-- **Ainda não disponíveis:** reprodução, miniaturas, leitura da duração de MP3/MP4, bibliotecas multidiretório e isolamento de decodificadores.
+- **v6.4 (proposta):** duração real de MP4/MOV e WAV compatíveis para novas inserções (sem corte automático de vídeos), dimensões de PNG, comando para restaurar a duração original de clipes existentes, atualização manual de metadados de projetos antigos, persistência em `.emproj.json` v3. Veja [o roteiro completo](docs/POC-001-media-v6.4.md).
+- **Ainda não disponíveis:** reprodução, miniaturas, leitura da duração de MP3/MKV/AVI/WebM, bibliotecas multidiretório e isolamento de decodificadores.
 
 Ao abrir uma versão com novas alterações, execute `dotnet test EditorMultimidia.sln` e `dotnet run --project src/Editor.Timeline.Wpf/Editor.Timeline.Wpf.csproj`. O GitHub Actions compila e testa automaticamente em Windows.
 
