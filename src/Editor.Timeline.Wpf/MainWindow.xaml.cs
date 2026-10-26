@@ -149,7 +149,7 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or ProjectFileException or ArgumentException or NotSupportedException)
         {
-            MessageBox.Show(this, $"Não foi possível salvar o projeto. O estado atual foi preservado.\n\n{ex.Message}",
+            MessageBox.Show(this, $"Não foi possível salvar o projeto\n{ex.Message}",
                 "Falha ao salvar", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
@@ -159,7 +159,7 @@ public partial class MainWindow : Window
     {
         if (!hasUnsavedChanges) return true;
         var answer = MessageBox.Show(this,
-            "Existem alterações não salvas. Deseja salvar o projeto antes de continuar?",
+            "Existem alterações não salvas\nDeseja salvar o projeto antes de continuar?",
             "Alterações não salvas", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         return answer switch
         {
@@ -233,7 +233,7 @@ public partial class MainWindow : Window
             or ProjectFileException or ArgumentException or NotSupportedException)
         {
             MessageBox.Show(this,
-                $"Não foi possível abrir o projeto. O projeto atual não foi substituído.\n\n{ex.Message}",
+                $"Não foi possível abrir o projeto\n{ex.Message}",
                 "Falha ao abrir", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -252,7 +252,7 @@ public partial class MainWindow : Window
         var missing = availableMedia.Count(pair => !pair.Value);
         MessageBox.Show(this, missing == 0
             ? $"{mediaAssets.Count} mídias vinculadas; nenhuma indisponível nesta verificação."
-            : $"{missing} mídia(s) indisponível(is). Os clipes foram preservados.\nSelecione um clipe indisponível e use Arquivo > Relocalizar mídia selecionada.",
+            : $"{missing} mídia(s) indisponível(is)\nSelecione um clipe indisponível e use Arquivo > Relocalizar mídia selecionada",
             "Verificação de mídias", MessageBoxButton.OK,
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
@@ -304,11 +304,7 @@ public partial class MainWindow : Window
         var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
-            $"{added} arquivo(s) vinculado(s) à timeline. Áudios e vídeos só entram com duração medida. " +
-            "Se o formato precisar de ffprobe e ele não estiver instalado, a inserção é recusada. " +
-            "Imagens continuam com 4 segundos editáveis." +
-            duplicateMessage + issueText +
-            "\nArquivos originais não foram copiados nem alterados. Cabeçalhos WAV/PNG e MP4/MOV são analisados sem decodificar.",
+            $"{added} arquivo(s) vinculado(s) à timeline",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
@@ -370,11 +366,10 @@ public partial class MainWindow : Window
                 ? "Remover do catálogo (sem clipes)"
                 : $"Em uso: {uses} clipe(s) — não remover do catálogo";
         RemoveMediaButton.ToolTip = !hasSelected
-            ? "Selecione uma mídia no catálogo do projeto."
+            ? "Selecione uma mídia da biblioteca do projeto"
             : uses == 0
-                ? "Remove somente a referência do catálogo. O arquivo original não é apagado."
-                : $"Não é possível remover: {uses} clipe(s) na timeline ainda usam esta mídia. " +
-                  "Excluir esses clipes é permitido; remover a referência do catálogo não.";
+                ? "Remove a referência da biblioteca"
+                : $"Não é possível remover: {uses} clipe(s) ainda estão em uso na timeline";
         var selectedClip = Selected();
         FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
             mediaAssets.Any(m => m.Id == selectedClip.MediaId);
@@ -411,7 +406,7 @@ public partial class MainWindow : Window
             availableMedia[asset.Id] = false;
             Draw();
             MessageBox.Show(this,
-                "Mídia indisponível. Relocalize a referência antes de inseri-la.",
+                "Mídia indisponível\nRelocalize a referência antes de inseri-la",
                 "Mídia indisponível", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -550,7 +545,7 @@ public partial class MainWindow : Window
             IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
         {
             MessageBox.Show(this,
-                $"Não foi possível relocalizar a mídia. A referência original foi preservada.\n\n{ex.Message}",
+                $"Não foi possível relocalizar a mídia, a referência original foi preservada\n{ex.Message}",
                 "Relocalização não realizada", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -730,7 +725,7 @@ public partial class MainWindow : Window
                     (linked?.PixelWidth is int width && linked?.PixelHeight is int height
                         ? $"\nDimensões PNG: {width} × {height}px" : "") +
                     (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
-                    (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la. Desfazer restaura o aviso." : ""),
+                    (clip.OrphanNotice ? "\nVínculo perdido: mova a mídia para reposicioná-la" : ""),
                 Child = content
             };
             rect.Tag = clip.Id;
