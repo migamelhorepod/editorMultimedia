@@ -36,8 +36,9 @@ public partial class MainWindow : Window
         public string Details => $"{Asset.Kind} · {Usages} clipe(s)" +
             (Missing ? " · MÍDIA INDISPONÍVEL" : "") +
             (Asset.DurationTicks is long ticks
-                ? $" · {TimeSpan.FromTicks(ticks).TotalSeconds:0.###}s (duração real)"
-                : "") +
+                ? $" · {Timecode.Format(new MediaTime(ticks))} (duração original)"
+                : Asset.Kind is MediaKind.Audio or MediaKind.Video
+                    ? " · duração não aferida" : "") +
             (Asset.PixelWidth is int width && Asset.PixelHeight is int height
                 ? $" · PNG {width}×{height}px"
                 : "") +
@@ -303,9 +304,9 @@ public partial class MainWindow : Window
         var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
-            $"{added} arquivo(s) vinculado(s) à timeline. WAV PCM/float reconhecido usa duração real; " +
-            "MP4/MOV reconhecidos também usam duração real. Áudios não medidos usam 5s; imagens, 4s. " +
-            "Vídeos sem duração identificada não são inseridos na timeline." +
+            $"{added} arquivo(s) vinculado(s) à timeline. Áudios e vídeos só entram com duração medida. " +
+            "Se o formato precisar de ffprobe e ele não estiver instalado, a inserção é recusada. " +
+            "Imagens continuam com 4 segundos editáveis." +
             duplicateMessage + issueText +
             "\nArquivos originais não foram copiados nem alterados. Cabeçalhos WAV/PNG e MP4/MOV são analisados sem decodificar.",
             "Importação de mídias", MessageBoxButton.OK,
@@ -610,7 +611,11 @@ public partial class MainWindow : Window
             var line = new Line { X1 = pos, X2 = pos, Y1 = RulerHeight - 5, Y2 = Surface.Height,
                 Stroke = Brush("#435064"), StrokeThickness = 0.6 };
             Surface.Children.Add(line);
-            AddText($"{second / 60:00}:{second % 60:00}", pos + 3, 10, Brush("#C6CFDC"), 11);
+            // Avoid overlapping labels on low zoom; keep seconds readable above 1 hour.
+            var rulerStep = Math.Max(5, (int)Math.Ceiling(95.0 / Scale / 5.0) * 5);
+            if (second % rulerStep == 0)
+                AddText(Timecode.Format(MediaTime.FromSeconds(second)),
+                    pos + 3, 10, Brush("#C6CFDC"), 11);
         }
         // Timeline markers are guides at absolute instants; they never shift when
         // clips are reorganized and they never affect clip overlap validation.
@@ -661,8 +666,8 @@ public partial class MainWindow : Window
             var content = new Grid();
             content.Children.Add(new TextBlock
             {
-                Text = linked is null ? $"{clip.Kind}  {clip.Duration.Seconds:0.#}s"
-                    : $"{linked.DisplayName}  {clip.Duration.Seconds:0.#}s",
+                Text = linked is null ? $"{clip.Kind}  {Timecode.Format(clip.Duration)}"
+                    : $"{linked.DisplayName}  {Timecode.Format(clip.Duration)}",
                 Foreground = Brushes.White,
                 Margin = new Thickness(7, 8, hasWarning ? 23 : 2, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -705,12 +710,14 @@ public partial class MainWindow : Window
                 BorderBrush = clip.Id == selectedId ? Brushes.White : hasWarning ? Brush("#F5BC53") : Brush("#708196"),
                 BorderThickness = new Thickness(clip.Id == selectedId || hasWarning ? 2 : 1),
                 Opacity = preview ? .72 : 1,
-                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {clip.Start.Seconds}s | duração do clipe {clip.Duration.Seconds}s" +
+                ToolTip = $"{(linked?.DisplayName ?? clip.Kind.ToString())} | {clip.Association} | início {Timecode.Format(clip.Start)} | duração editada {Timecode.Format(clip.Duration)}" +
                     (linked is not null ? $"\nArquivo vinculado: {linked.SourcePath}" : "\nClipe de demonstração") +
+                    (linked is { Kind: MediaKind.Audio or MediaKind.Video }
+                        ? $"\nTrecho na fonte: {Timecode.Format(clip.SourceStart)} até {Timecode.Format(clip.SourceEnd)}" : "") +
                     (linked?.DurationTicks is long originalTicks
-                        ? $"\nDuração original aferida: {TimeSpan.FromTicks(originalTicks).TotalSeconds:0.###}s"
+                        ? $"\nDuração original aferida: {Timecode.Format(new MediaTime(originalTicks))}"
                         : linked is { Kind: MediaKind.Audio or MediaKind.Video }
-                            ? "\nDuração original não aferida — inserção provisória" : "") +
+                            ? "\nDuração original não aferida — projeto legado" : "") +
                     (linked?.PixelWidth is int width && linked?.PixelHeight is int height
                         ? $"\nDimensões PNG: {width} × {height}px" : "") +
                     (missingMedia ? "\nMídia indisponível: o arquivo vinculado não foi encontrado na última verificação." : "") +
@@ -726,11 +733,11 @@ public partial class MainWindow : Window
         }
         var displayedResize = resizingClip && hasDragPreview && previewState is not null && draggingId is Guid resizingId
             ? previewState.Clips.FirstOrDefault(c => c.Id == resizingId) : null;
-        Status.Text = $"Projeto: {projectName}{(hasUnsavedChanges ? " (não salvo)" : "")} | Cursor {playheadSeconds:0.##}s | Versão {session.Current.Version} | {session.Current.Clips.Count} clipes | Duração {session.Current.Duration.Seconds:0.##}s | " +
+        Status.Text = $"Projeto: {projectName}{(hasUnsavedChanges ? " (não salvo)" : "")} | Cursor {Timecode.Format(MediaTime.FromSeconds((decimal)playheadSeconds))} | Versão {session.Current.Version} | {session.Current.Clips.Count} clipes | Duração {Timecode.Format(session.Current.Duration)} | " +
             (selected is not null ? Describe(selected) : "Selecione um clipe e arraste para mover.") +
             (resizingClip && hasDragPreview ? previewError is not null
                 ? $" | Prévia de redimensionamento indisponível: {previewError}"
-                : $" | Prévia: início {(displayedResize?.Start ?? resizePreviewStart).Seconds:0.0}s, duração {(displayedResize?.Duration ?? resizePreviewDuration).Seconds:0.0}s" +
+                : $" | Prévia: início {Timecode.Format(displayedResize?.Start ?? resizePreviewStart)}, duração {Timecode.Format(displayedResize?.Duration ?? resizePreviewDuration)}" +
                   (resolvedPreviewTrack is int newTrack && newTrack != originalTrack
                       ? $" | Realocação: Trilha {newTrack + 1}" : "") : "") +
             (draggingMain && hasDragPreview ? previewError is not null
@@ -766,7 +773,7 @@ public partial class MainWindow : Window
         };
     }
 
-    private static string Describe(Clip c) => $"Selecionado: trilha {c.Track + 1}, {c.Start.Seconds:0.##}s, {c.Association}" +
+    private static string Describe(Clip c) => $"Selecionado: trilha {c.Track + 1}, {Timecode.Format(c.Start)}, {c.Association}" +
         (c.OrphanNotice ? " — vínculo perdido: mova a mídia para retirar o aviso" : "");
 
     private static Brush Brush(string hex) => (Brush)new BrushConverter().ConvertFromString(hex)!;
@@ -1429,6 +1436,11 @@ public partial class MainWindow : Window
     private void Run(Func<TimelineState, CommandResult> operation)
     {
         try { session.Execute(operation); UpdateDirty(); }
+        catch (MediaReferenceException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Trecho fora da fonte",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         catch (TimelineException ex)
         {
             // Uma colisão só gera aviso quando nenhuma das dez trilhas comporta a mídia.
