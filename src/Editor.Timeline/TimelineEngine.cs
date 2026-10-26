@@ -205,7 +205,13 @@ public static partial class TimelineEngine
         var current = state.Find(id);
         if (current.Track != MainTrack)
             throw new TimelineException("NOT_MAIN", "Clip is not on main track.");
-        if (requestedLeftEdge.Ticks < 0 || requestedLeftEdge.Ticks >= current.End.Ticks)
+        // For the *first* main clip the requested edge is a virtual source
+        // position: negative values can restore frames trimmed off its left
+        // side while the clip itself stays anchored to timeline time zero.
+        // The session checks the actual source start/end before committing.
+        // Later main clips cannot request a negative absolute timeline edge.
+        if ((current.Start.Ticks > 0 && requestedLeftEdge.Ticks < 0) ||
+            requestedLeftEdge.Ticks >= current.End.Ticks)
             throw new TimelineException("INVALID_RESIZE", "Left trim must preserve a positive duration.");
         if (requestedLeftEdge == current.Start)
             return Commit(state, state.Clips.ToList());

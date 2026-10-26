@@ -1049,8 +1049,15 @@ public partial class MainWindow : Window
                 // a shared boundary: the previous clip must never change size.
                 // The selected clip retains its actual start, while its duration
                 // changes and the following clips ripple to the new positions.
-                // Trimming cannot create negative timeline time or zero duration.
-                var newStart = Math.Clamp(snapped, 0.0,
+                // The first main clip may extend its *virtual* source edge
+                // before timeline zero to recover previously trimmed footage.
+                // Its real timeline start stays at zero. Other left edges are
+                // limited by the source offset and never go before timeline zero.
+                var earliest = clip.Track == TimelineEngine.MainTrack &&
+                    clip.Start == MediaTime.Zero
+                    ? -Seconds(clip.SourceStart)
+                    : Math.Max(0.0, originalSeconds - Seconds(clip.SourceStart));
+                var newStart = Math.Clamp(snapped, earliest,
                     originalSeconds + Seconds(originalResizeDuration) - .1);
                 resizePreviewStart = MediaTime.FromSeconds((decimal)Math.Round(newStart, 1));
                 resizePreviewDuration = MediaTime.FromSeconds((decimal)Math.Round(

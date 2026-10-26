@@ -461,6 +461,24 @@ public sealed class Poc001ClosureTests
     }
 
     [Fact]
+    public void FirstMainVideoCanRecoverLeftCutWithoutNegativeTimelinePosition()
+    {
+        var video = File(seconds: 30);
+        var clip = ClipFrom(video, 20, sourceStart: 10);
+        var session = new TimelineSession(new TimelineState(0, [clip]), [video]);
+        // The virtual left edge is -10, but the actual first main clip
+        // continues to start at 0 in the timeline.
+        session.Execute(s => TimelineEngine.TrimMainLeft(s, s.Version, clip.Id, T(-10)));
+        Assert.Equal(MediaTime.Zero, session.Current.Find(clip.Id).Start);
+        Assert.Equal(MediaTime.Zero, session.Current.Find(clip.Id).SourceStart);
+        Assert.Equal(T(30), session.Current.Find(clip.Id).Duration);
+        Assert.Throws<MediaReferenceException>(() => session.Execute(s =>
+            TimelineEngine.TrimMainLeft(s, s.Version, clip.Id, T(-1))));
+        session.Undo();
+        Assert.Equal(clip, session.Current.Find(clip.Id));
+    }
+
+    [Fact]
     public void StillImageCanGrowFromEitherEdgeWithoutSourceTime()
     {
         var image = File(MediaKind.Image);
