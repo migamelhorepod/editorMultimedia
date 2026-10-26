@@ -307,10 +307,13 @@ public sealed class LeftTrimTests
             TimelineEngine.TrimMainLeft(state, 0, second.Id, T(-1))).Code);
         Assert.Equal("INVALID_RESIZE", Assert.Throws<TimelineException>(() =>
             TimelineEngine.TrimMainLeft(state, 0, second.Id, T(17))).Code);
-        // Even when the timeline has enough room, a video cannot be stretched.
-        Assert.Equal("TEMPORAL_STRETCH", Assert.Throws<TimelineException>(() =>
-            TimelineEngine.TrimMainLeft(state, 0, second.Id, T(0))).Code);
-        Assert.Equal(first, state.Find(first.Id));
+        // Pure-domain test: the caller's session validates physical source bounds.
+        // The main clip can be extended as a timeline operation and its source
+        // offset is moved accordingly.
+        var restored = TimelineEngine.TrimMainLeft(state, 0, second.Id, T(0)).State;
+        Assert.Equal(first, restored.Find(first.Id));
+        Assert.Equal(T(17), restored.Find(second.Id).Duration);
+        Assert.Equal(T(-8), restored.Find(second.Id).SourceStart);
         Assert.Equal(T(9), state.Find(second.Id).Duration);
     }
 }
