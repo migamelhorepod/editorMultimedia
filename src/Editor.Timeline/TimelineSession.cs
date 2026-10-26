@@ -32,6 +32,12 @@ public sealed class TimelineSession
         if (result.State.Version != Current.Version + 1)
             throw new TimelineException("INVALID_COMMAND", "Command must produce next version.");
         var candidateMedia = nextMedia?.ToArray() ?? Media;
+        // Validate physical source bounds only for ranges actually created or edited.
+        // Legacy clips may exceed newly measured source lengths; merely refreshing
+        // metadata, moving clips or saving may not silently erase user edits.
+        var verified = MediaReferences.VerifyEditedRanges(Current, result.State, candidateMedia);
+        if (!ReferenceEquals(verified, result.State))
+            result = result with { State = verified };
         MediaReferences.ValidateCatalog(candidateMedia, result.State);
 
         // Every operation commits both pieces together, or neither.

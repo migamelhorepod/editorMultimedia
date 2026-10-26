@@ -77,7 +77,8 @@ public static class ProjectStore
                 StartTicks = c.Start.Ticks, DurationTicks = c.Duration.Ticks,
                 Association = c.Association, ParentId = c.ParentId,
                 ParentOffsetTicks = c.ParentOffset.Ticks, OrphanNotice = c.OrphanNotice,
-                EffectsToken = c.EffectsToken, SourceStartTicks = c.SourceStart.Ticks
+                EffectsToken = c.EffectsToken, SourceStartTicks = c.SourceStart.Ticks,
+                SourceRangeVerified = c.SourceRangeVerified
             }).ToList(),
             Markers = project.Timeline.MarkerItems.Select(m => new MarkerFile
             {
@@ -118,7 +119,7 @@ public static class ProjectStore
             var clips = file.Clips.Select(c => new Clip(c.Id, c.MediaId, c.Kind, c.Track,
                 new MediaTime(c.StartTicks), new MediaTime(c.DurationTicks), c.Association,
                 c.ParentId, new MediaTime(c.ParentOffsetTicks), c.OrphanNotice, c.EffectsToken,
-                new MediaTime(c.SourceStartTicks))).ToArray();
+                new MediaTime(c.SourceStartTicks), c.SourceRangeVerified)).ToArray();
             var markers = file.Markers.Select(m => new TimelineMarker(m.Id, new MediaTime(m.AtTicks), m.Label!)).ToArray();
             var media = file.Media?.Select(m => new MediaAsset(m.Id, m.Kind,
                 m.DisplayName ?? string.Empty, m.SourcePath ?? string.Empty, m.SizeBytes,
@@ -200,6 +201,7 @@ public static class ProjectStore
         public bool OrphanNotice { get; set; }
         public string? EffectsToken { get; set; }
         public long SourceStartTicks { get; set; }
+        public bool SourceRangeVerified { get; set; }
     }
 
     private sealed class MediaFile

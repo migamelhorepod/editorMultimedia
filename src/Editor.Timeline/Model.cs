@@ -21,7 +21,8 @@ public sealed record Clip(
     Guid? ParentId = null, MediaTime ParentOffset = default,
     bool OrphanNotice = false,
     string? EffectsToken = null,
-    MediaTime SourceStart = default)
+    MediaTime SourceStart = default,
+    bool SourceRangeVerified = false)
 {
     public MediaTime End => Start + Duration;
     public MediaTime SourceEnd => SourceStart + Duration;

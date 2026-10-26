@@ -168,13 +168,39 @@ public static class MediaReferences
                 if (clip.SourceStart != MediaTime.Zero)
                     throw new MediaReferenceException("Imagens não podem ter deslocamento temporal de origem.");
             }
-            else if (media.DurationTicks is long fullLength &&
+            else if (clip.SourceRangeVerified && media.DurationTicks is long fullLength &&
                      ((decimal)clip.SourceStart.Ticks + clip.Duration.Ticks > fullLength))
                 throw new MediaReferenceException("O clipe ultrapassa a duração do arquivo original.");
         }
     }
 
-    /// <summary>Placeholder durations until media probing in POC-002.</summary>
+    /// <summary>Checks new/edited time ranges without rewriting legacy clip edits.</summary>
+    public static TimelineState VerifyEditedRanges(
+        TimelineState before, TimelineState after, IReadOnlyList<MediaAsset> catalog)
+    {
+        var old = before.Clips.ToDictionary(c => c.Id);
+        var changed = false;
+        var clips = after.Clips.Select(c =>
+        {
+            var asset = catalog.FirstOrDefault(m => m.Id == c.MediaId);
+            if (asset is null || c.Kind == MediaKind.Image ||
+                asset.DurationTicks is not long measured) return c;
+            var rangeWasEdited = !old.TryGetValue(c.Id, out var prior) ||
+                c.SourceStart != prior.SourceStart || c.Duration != prior.Duration;
+            if (!rangeWasEdited) return c;
+
+            if (c.SourceStart.Ticks < 0 ||
+                (decimal)c.SourceStart.Ticks + c.Duration.Ticks > measured)
+                throw new MediaReferenceException(
+                    "O corte ultrapassa o início ou fim do arquivo original. " +
+                    "A alteração não foi aplicada.");
+            changed |= !c.SourceRangeVerified;
+            return c with { SourceRangeVerified = true };
+        }).ToArray();
+        return changed ? after with { Clips = clips } : after;
+    }
+
+    /// <summary>Temporal media needs measured duration; never insert five fake seconds.</summary>
     public static Clip PlanClip(TimelineState state, MediaAsset asset, MediaTime playhead, Guid clipId)
     {
         TimelineEngine.Validate(state);
@@ -203,6 +229,7 @@ public static class MediaReferences
                 .DefaultIfEmpty(-1).First();
             if (track < 0) throw new TimelineException("NO_FREE_TRACK", "Nenhuma trilha secundária disponível.");
         }
-        return new Clip(clipId, asset.Id, asset.Kind, track, start, duration);
+        return new Clip(clipId, asset.Id, asset.Kind, track, start, duration,
+            SourceRangeVerified: asset.Kind is MediaKind.Audio or MediaKind.Video);
     }
 }
