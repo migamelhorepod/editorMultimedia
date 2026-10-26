@@ -831,10 +831,7 @@ public partial class MainWindow : Window
     {
         var at = MediaTime.FromSeconds((decimal)Math.Round(playheadSeconds, 1));
         if (session.Current.MarkerItems.Any(m => m.At == at))
-        {
-            Status.Text = "Já existe um marcador nesta posição.";
             return;
-        }
         var taken = session.Current.MarkerItems.Select(m => m.Label).ToHashSet();
         var number = 1;
         while (taken.Contains($"Marcador {number}")) number++;
@@ -848,11 +845,7 @@ public partial class MainWindow : Window
         var nearest = session.Current.MarkerItems
             .Where(m => Math.Abs(m.At.Ticks - at.Ticks) <= 1_000_000) // 0.1s tolerance
             .OrderBy(m => Math.Abs(m.At.Ticks - at.Ticks)).FirstOrDefault();
-        if (nearest is null)
-        {
-            Status.Text = "Posicione o cursor sobre um marcador para removê-lo.";
-            return;
-        }
+        if (nearest is null) return;
         Run(s => TimelineEngine.RemoveMarker(s, s.Version, nearest.Id));
     }
 
@@ -1327,7 +1320,6 @@ public partial class MainWindow : Window
                 if (session.Current.MarkerItems.Any(m => m.Id != markerId && m.At == movedTo))
                 {
                     playheadSeconds = Seconds(movedFrom);
-                    Status.Text = "Já existe um marcador nesta posição.";
                 }
                 else Run(s => TimelineEngine.MoveMarker(s, s.Version, markerId, movedTo));
             }

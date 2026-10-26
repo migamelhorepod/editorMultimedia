@@ -103,3 +103,12 @@ Continuam valendo os testes de `TimelineTests`, `LeftTrimTests`, `MarkerTests`, 
 - Efeitos/keyframes vinculados à fonte, velocidade variável, áudio multifaixa real e precisão visual por quadros: requerem contratos específicos das próximas etapas.
 
 **Critério de conclusão:** merge somente após GitHub Actions verde **e confirmação manual dos casos críticos** pelo responsável pelo produto. O projeto ainda não é um editor audiovisual reproduzível; esta entrega homologa somente a edição lógica da timeline.
+
+## Diretriz de interação WPF aprovada
+
+- A timeline funciona **sem caixas de mensagem, alertas ou avisos textuais gerados pelos gestos**: arrastar, cortar, dividir, duplicar, mover, restaurar duração, marcadores e redimensionar.
+- Um arraste de áudio/vídeo deve **parar visualmente no limite da duração real do arquivo**, tanto no início quanto no fim; nenhuma operação inválida modifica estado/histórico.
+- Sinais visuais persistentes de condição do projeto (por exemplo, o ícone de vínculo perdido), que não interrompem o fluxo, continuam possíveis.
+- Diálogos de gerenciamento de projeto (salvar, abrir, confirmar alterações não salvas) e mensagens de importação/catálogo **não são interações diretas na timeline** e mantêm seus próprios comportamentos.
+- **Novas mensagens na timeline somente mediante pedido explícito da responsável pelo produto.**
+- Orientações de CMD ao responsável pelo produto: apresentar **um comando por bloco**, nunca PowerShell, salvo solicitação expressa.

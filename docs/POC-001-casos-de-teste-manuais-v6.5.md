@@ -13,7 +13,7 @@
 | **UI-03** | Tentar importar mídia inválida e áudio que precisa de ffprobe sem o executável acessível | Mensagem compreensível, sem criação de clipe fictício nem perda de dados |
 | **UI-04** | Importar um áudio uma vez e reutilizá-lo **em duas trilhas**, procurar/filtrar a mídia e tentar **Remover do catálogo**; depois excluir cada clipe individualmente | Enquanto existir **qualquer clipe** desse arquivo em qualquer trilha, o catálogo mostra **1 ou mais ocorrências** e o botão de remoção fica desabilitado. **Excluir clipe da timeline** é permitido. Depois de excluir o último clipe, a mídia **continua no catálogo**, podendo então ser removida; o arquivo físico nunca é apagado |
 | **UI-05** | Importar PNG, aumentar e reduzir a duração de exibição, dividir | Imagem inicia com 4 s e continua livremente redimensionável |
-| **UI-06** | Cortar áudio/vídeo pelas duas bordas, inclusive a **esquerda do primeiro vídeo na principal**; depois alongar novamente até os trechos disponíveis da origem; tentar ultrapassar a fonte | Reextensão funciona dentro da duração original, mesmo que o clipe principal continue começando em `00:00:00`; exceder a fonte é recusado sem criar histórico |
+| **UI-06** | Cortar áudio/vídeo pelas duas bordas, inclusive a **esquerda do primeiro vídeo na principal**; alongar novamente e arrastar além dos limites do arquivo | A borda **para no limite real da fonte**, sem mensagens ou janelas de aviso; o primeiro clipe permanece em `00:00:00` |
 | **UI-07** | Clique direito **sobre um clipe de áudio/vídeo** e selecionar **Restaurar duração original do clipe** | A opção aparece no menu contextual, restaura todo o arquivo, zera o início na fonte e pode ser desfeita/refeita |
 
 ## Sessão 2 — Comportamento da timeline
