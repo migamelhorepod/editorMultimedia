@@ -109,6 +109,76 @@ public sealed class MediaMetadataTests
             MediaReferences.PlanClip(state, bad, MediaTime.Zero, Guid.NewGuid()));
     }
 
+    [Fact]
+    public void DamagedRiffLengthMustNeverCallFfprobeFallback()
+    {
+        using var temp = new TemporaryFiles();
+        var bytes = BuildWave();
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4, 4), 1000000);
+        var path = temp.Create("truncated-with-ffprobe.wav", bytes);
+        var probeInvocations = 0;
+        var result = MediaMetadataProbe.Read(path, MediaKind.Audio, (_, _) =>
+        {
+            probeInvocations++;
+            return MediaTime.FromSeconds(1).Ticks;
+        });
+
+        Assert.Null(result.DurationTicks);
+        Assert.Equal(0, probeInvocations);
+    }
+
+    [Fact]
+    public void InconsistentMulawHeaderMustNeverCallFfprobeFallback()
+    {
+        using var temp = new TemporaryFiles();
+        // A µ-law tag with 16-bit PCM alignment is structurally invalid.
+        var path = temp.Create("malformed-mulaw.wav", BuildWave(format: 7));
+        var probeInvocations = 0;
+        var result = MediaMetadataProbe.Read(path, MediaKind.Audio, (_, _) =>
+        {
+            probeInvocations++;
+            return MediaTime.FromSeconds(2).Ticks;
+        });
+
+        Assert.Null(result.DurationTicks);
+        Assert.Equal(0, probeInvocations);
+    }
+
+    [Fact]
+    public void ValidCompressedWaveMayUseMeasuredExternalDuration()
+    {
+        using var temp = new TemporaryFiles();
+        // The WAV envelope is consistent; native PCM parser cannot measure µ-law.
+        var path = temp.Create("valid-mulaw.wav", BuildWave(format: 7, bits: 8));
+        var probeInvocations = 0;
+        var measuredTicks = MediaTime.FromSeconds(1.125m).Ticks;
+        var result = MediaMetadataProbe.Read(path, MediaKind.Audio, (_, kind) =>
+        {
+            Assert.Equal(MediaKind.Audio, kind);
+            probeInvocations++;
+            return measuredTicks;
+        });
+
+        Assert.Equal(measuredTicks, result.DurationTicks);
+        Assert.Equal(1, probeInvocations);
+    }
+
+    [Fact]
+    public void ValidPcmWaveKeepsNativeMeasurementWithoutFfprobe()
+    {
+        using var temp = new TemporaryFiles();
+        var path = temp.Create("native-pcm.wav", BuildWave());
+        var probeInvocations = 0;
+        var result = MediaMetadataProbe.Read(path, MediaKind.Audio, (_, _) =>
+        {
+            probeInvocations++;
+            return MediaTime.FromSeconds(999).Ticks;
+        });
+
+        Assert.Equal(MediaTime.FromSeconds(1).Ticks, result.DurationTicks);
+        Assert.Equal(0, probeInvocations);
+    }
+
     [Fact] public void TruncatedRiffChunkDoesNotCrashImport()
     {
         using var temp = new TemporaryFiles();
