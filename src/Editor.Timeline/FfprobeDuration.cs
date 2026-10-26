@@ -46,7 +46,7 @@ public static class FfprobeDuration
                 }
             };
             foreach (var arg in new[] {
-                "-hide_banner", "-v", "quiet", "-nostdin",
+                "-hide_banner", "-v", "quiet",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 "-i", chosenLocalFile
