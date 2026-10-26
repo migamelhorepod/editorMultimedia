@@ -45,7 +45,7 @@ public sealed partial class WindowsWorkerPipe
 
         var request = await WorkerWireProtocol.ReadAsync<WorkerRequest>(
             server, cancellationToken).ConfigureAwait(false);
-        var decision = registry.Authorize(request);
+        var decision = MediaWorkerAdmission.AuthorizeMediaRequest(registry, request);
         var response = new WorkerResponse(WorkerRequest.CurrentVersion, request.RequestId, decision);
         await WorkerWireProtocol.WriteAsync(server, response, cancellationToken)
             .ConfigureAwait(false);
