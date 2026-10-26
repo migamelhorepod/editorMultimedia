@@ -118,7 +118,7 @@ public static class ProjectStore
             var clips = file.Clips.Select(c => new Clip(c.Id, c.MediaId, c.Kind, c.Track,
                 new MediaTime(c.StartTicks), new MediaTime(c.DurationTicks), c.Association,
                 c.ParentId, new MediaTime(c.ParentOffsetTicks), c.OrphanNotice, c.EffectsToken,
-                new MediaTime(c.SourceStartTicks)).ToArray();
+                new MediaTime(c.SourceStartTicks))).ToArray();
             var markers = file.Markers.Select(m => new TimelineMarker(m.Id, new MediaTime(m.AtTicks), m.Label!)).ToArray();
             var media = file.Media?.Select(m => new MediaAsset(m.Id, m.Kind,
                 m.DisplayName ?? string.Empty, m.SourcePath ?? string.Empty, m.SizeBytes,
