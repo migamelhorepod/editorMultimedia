@@ -8,7 +8,7 @@ namespace Editor.Timeline.Tests;
 public sealed class Poc001ClosureTests
 {
     private static MediaTime T(decimal seconds) => MediaTime.FromSeconds(seconds);
-    private static readonly decimal SourceSeconds = 704.7m;
+    private const decimal SourceSeconds = 704.7m;
 
     private static MediaAsset File(MediaKind kind = MediaKind.Video, decimal seconds = SourceSeconds)
     {
