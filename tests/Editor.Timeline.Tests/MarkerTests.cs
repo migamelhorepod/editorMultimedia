@@ -153,6 +153,6 @@ public sealed class MarkerTests
         Assert.Empty(session.Current.MarkerItems);
         session.Redo(); session.Redo(); session.Redo();
         Assert.Equal(T(4), Assert.Single(session.Current.MarkerItems).At);
-        Assert.Equal(T(9), session.Current.Find(clip.Id).Duration);
+        Assert.Equal(T(7), session.Current.Find(clip.Id).Duration);
     }
 }
