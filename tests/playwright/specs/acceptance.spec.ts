@@ -48,7 +48,8 @@ for (const op of ['resize', 'trimLeft']) {
   test(`CT-014/015: Dado redo / Quando ${op} ultrapassa fonte / Então falha sem mudar estado`, async ({ folder }) => {
     const file = await wave(folder), clip = id();
     const r = await run([insert(file, clip, 3), { op: 'marker', id: id(), seconds: 1 }, { op: 'undo' }, { op, id: clip, seconds: op === 'resize' ? 13 : 2 }, { op: 'redo' }]);
-    allOk(r.filter((_, i) => i !== 3)); expect(r[3].error?.type).toBe('MediaReferenceException');
+    allOk(r.filter((_, i) => i !== 3)); expect(r[3].error?.type).toBe('TimelineException');
+    expect(r[3].error?.code).toBe('TEMPORAL_STRETCH');
     expect(r[3].project).toEqual(r[2].project); expect(r[3].canRedo).toBe(true); expect(r[4].project).toEqual(r[1].project);
   });
 }
@@ -132,4 +133,47 @@ test('CT-011/012/013/017: Dado vídeo real / Quando cortar, dividir e restaurar 
   expect(r[5].project.clips.find(c => c.id === first)!).toMatchObject({ sourceStartTicks: 0, durationTicks: ticks(12) });
   expect(r[5].project.clips.find(c => c.id === right)!.startTicks).toBe(ticks(12));
   expect(r[6].project).toEqual(r[4].project); expect(r[7].project).toEqual(r[5].project);
+});
+
+
+test('UI-06: Dado áudio real encurtado / Quando esticar ambos os lados / Então é proibido sem mudar histórico', async ({ folder }) => {
+  const file = await wave(folder), clip = id(), marker = id();
+  const r = await run([
+    insert(file, clip, 3),
+    { op: 'resize', id: clip, seconds: 8 },
+    { op: 'marker', id: marker, seconds: 1 },
+    { op: 'undo' },
+    { op: 'resize', id: clip, seconds: 9 },
+    { op: 'trimLeft', id: clip, seconds: 2 },
+    { op: 'redo' },
+  ]);
+  allOk(r.filter((_, i) => i !== 4 && i !== 5));
+  for (const index of [4, 5]) {
+    expect(r[index].error?.type).toBe('TimelineException');
+    expect(r[index].error?.code).toBe('TEMPORAL_STRETCH');
+    expect(r[index].project).toEqual(r[3].project);
+    expect(r[index].canRedo).toBe(true);
+  }
+  expect(r[6].project).toEqual(r[2].project);
+});
+
+test('UI-06/UI-07: Dado vídeo real cortado / Quando esticar ou restaurar / Então só restauração recupera a duração', async ({ folder }) => {
+  const file = await media(folder, 'mp4', true), clip = id();
+  const r = await run([
+    insert(file, clip),
+    { op: 'resize', id: clip, seconds: 8 },
+    { op: 'resize', id: clip, seconds: 9 },
+    { op: 'trimLeft', id: clip, seconds: -1 },
+    { op: 'restore', id: clip },
+    { op: 'undo' },
+    { op: 'redo' },
+  ]);
+  allOk(r.filter((_, i) => i !== 2 && i !== 3));
+  expect(r[2].error?.code).toBe('TEMPORAL_STRETCH');
+  expect(r[3].error?.code).toBe('INVALID_RESIZE');
+  expect(r[2].project).toEqual(r[1].project);
+  expect(r[3].project).toEqual(r[1].project);
+  expect(r[4].project.clips[0].durationTicks).toBe(ticks(12));
+  expect(r[5].project).toEqual(r[1].project);
+  expect(r[6].project).toEqual(r[4].project);
 });

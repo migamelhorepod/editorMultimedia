@@ -174,8 +174,9 @@ public sealed class Poc001ClosureTests
         var prior = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Video, 0, T(0), T(10));
         var first = ClipFrom(video, 8, start: 10);
         var session = new TimelineSession(new TimelineState(0, [prior, first]), [video]);
-        Assert.Throws<MediaReferenceException>(() =>
+        var error = Assert.Throws<TimelineException>(() =>
             session.Execute(s => TimelineEngine.TrimMainLeft(s, s.Version, first.Id, T(8))));
+        Assert.Equal("TEMPORAL_STRETCH", error.Code);
         Assert.Equal(prior, session.Current.Find(prior.Id));
         Assert.Same(first, session.Current.Find(first.Id));
         Assert.False(session.CanUndo);
@@ -188,24 +189,31 @@ public sealed class Poc001ClosureTests
         var first = ClipFrom(file, 10, lane: 1);
         var original = new TimelineState(0, [first]);
         var session = new TimelineSession(original, [file]);
-        Assert.Throws<MediaReferenceException>(() =>
+        var error = Assert.Throws<TimelineException>(() =>
             session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, first.Id, T(13))));
+        Assert.Equal("TEMPORAL_STRETCH", error.Code);
         Assert.Same(original, session.Current);
         Assert.False(session.CanUndo);
     }
 
     [Fact]
-    public void SourceEndIsCheckedAfterBothStartOffsetAndRightResize()
+    public void CuttingAudioKeepsSourceOffsetAndManualStretchIsRejectedEvenWithinSource()
     {
         var file = File(MediaKind.Audio, 18);
-        var first = ClipFrom(file, 8, sourceStart: 7, lane: 1);
+        var first = ClipFrom(file, 11, sourceStart: 7, lane: 1);
         var session = new TimelineSession(new TimelineState(0, [first]), [file]);
-        session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, first.Id, T(11)));
-        Assert.Equal(T(18), session.Current.Find(first.Id).SourceEnd);
-        Assert.Throws<MediaReferenceException>(() =>
-            session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, first.Id, T(11.1m))));
-        Assert.Equal(T(11), session.Current.Find(first.Id).Duration);
+        session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, first.Id, T(8)));
+        Assert.Equal(T(7), session.Current.Find(first.Id).SourceStart);
+        Assert.Equal(T(15), session.Current.Find(first.Id).SourceEnd);
+        // Nine seconds would fit the 18-second original, but remains forbidden:
+        // timeline handles only allow shortening, not manual stretching.
+        var error = Assert.Throws<TimelineException>(() =>
+            session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, first.Id, T(9))));
+        Assert.Equal("TEMPORAL_STRETCH", error.Code);
+        Assert.Equal(T(8), session.Current.Find(first.Id).Duration);
         Assert.True(session.CanUndo);
+        session.Undo();
+        Assert.Equal(first, session.Current.Find(first.Id));
     }
 
     [Fact]
@@ -377,5 +385,89 @@ public sealed class Poc001ClosureTests
             new TimelineState(0, [clip]), [video]);
         Assert.Throws<ProjectFileException>(() => ProjectStore.Serialize(project));
     }
+
+
+    [Theory]
+    [InlineData(MediaKind.Audio)]
+    [InlineData(MediaKind.Video)]
+    public void TemporalClipCanBeShortenedButNeverStretchedUsingNormalResizing(MediaKind kind)
+    {
+        var file = File(kind, 30);
+        var track = kind == MediaKind.Video ? 0 : 1;
+        var clip = ClipFrom(file, 30, lane: track);
+        var state = new TimelineState(0, [clip]);
+        var session = new TimelineSession(state, [file]);
+
+        session.Execute(s => kind == MediaKind.Video
+            ? TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(20))
+            : TimelineEngine.ResizeSecondary(s, s.Version, clip.Id, T(20)));
+        Assert.Equal(T(20), session.Current.Find(clip.Id).Duration);
+
+        var error = Assert.Throws<TimelineException>(() => session.Execute(s =>
+            kind == MediaKind.Video
+                ? TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(25))
+                : TimelineEngine.ResizeSecondary(s, s.Version, clip.Id, T(25))));
+        Assert.Equal("TEMPORAL_STRETCH", error.Code);
+        Assert.Equal(T(20), session.Current.Find(clip.Id).Duration);
+        Assert.Equal(T(0), session.Current.Find(clip.Id).SourceStart);
+        session.Undo();
+        Assert.Equal(clip, session.Current.Find(clip.Id));
+    }
+
+    [Theory]
+    [InlineData(MediaKind.Audio)]
+    [InlineData(MediaKind.Video)]
+    public void SourceRangeAvailableForReextensionStillDoesNotPermitStretch(MediaKind kind)
+    {
+        var file = File(kind, 40);
+        var track = kind == MediaKind.Video ? 0 : 1;
+        var clip = ClipFrom(file, 20, start: 10, sourceStart: 10, lane: track);
+        var state = new TimelineState(0, [clip]);
+        var session = new TimelineSession(state, [file]);
+
+        // Both sides are safely inside the original source; still forbidden.
+        var right = Assert.Throws<TimelineException>(() => session.Execute(s =>
+            kind == MediaKind.Video
+                ? TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(21))
+                : TimelineEngine.ResizeSecondary(s, s.Version, clip.Id, T(21))));
+        Assert.Equal("TEMPORAL_STRETCH", right.Code);
+        var left = Assert.Throws<TimelineException>(() => session.Execute(s =>
+            kind == MediaKind.Video
+                ? TimelineEngine.TrimMainLeft(s, s.Version, clip.Id, T(9))
+                : TimelineEngine.TrimSecondaryLeft(s, s.Version, clip.Id, T(9))));
+        Assert.Equal("TEMPORAL_STRETCH", left.Code);
+        Assert.False(session.CanUndo);
+        Assert.Same(state, session.Current);
+    }
+
+    [Fact]
+    public void StillImageCanGrowFromEitherEdgeWithoutSourceTime()
+    {
+        var image = File(MediaKind.Image);
+        var clip = ClipFrom(image, 4, start: 5, lane: 1);
+        var session = new TimelineSession(new TimelineState(0, [clip]), [image]);
+        session.Execute(s => TimelineEngine.TrimSecondaryLeft(s, s.Version, clip.Id, T(3)));
+        Assert.Equal(T(6), session.Current.Find(clip.Id).Duration);
+        session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, clip.Id, T(8)));
+        Assert.Equal(T(8), session.Current.Find(clip.Id).Duration);
+        Assert.Equal(MediaTime.Zero, session.Current.Find(clip.Id).SourceStart);
+    }
+
+    [Fact]
+    public void ExplicitRestorationCanRegainFullVideoDurationWithoutManualStretch()
+    {
+        // The full-media restore path is separate from ordinary resize operations.
+        // Real file probing and rippling are covered by MediaMetadataTests.
+        var video = File(seconds: 30);
+        var clip = ClipFrom(video, 8, sourceStart: 5);
+        var session = new TimelineSession(new TimelineState(0, [clip]), [video]);
+        Assert.Equal("TEMPORAL_STRETCH", Assert.Throws<TimelineException>(() =>
+            session.Execute(s => TimelineEngine.ResizeMain(s, s.Version, clip.Id, T(30)))).Code);
+        var restored = TimelineEngine.RestoreMainDuration(
+            session.Current, session.Current.Version, clip.Id, T(30));
+        Assert.Equal(T(30), restored.State.Find(clip.Id).Duration);
+        Assert.Equal(T(8), session.Current.Find(clip.Id).Duration);
+    }
+
 
 }
