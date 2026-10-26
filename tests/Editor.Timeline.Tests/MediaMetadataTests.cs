@@ -96,7 +96,7 @@ public sealed class MediaMetadataTests
         Assert.Equal(MediaTime.FromSeconds(0.5m).Ticks, asset.DurationTicks);
     }
 
-    [Fact] public void UnrecognizedOrTruncatedWavUsesClearlyProvisionalDuration()
+    [Fact] public void UnrecognizedOrTruncatedWavCannotBeInsertedWithFalseDuration()
     {
         using var temp = new TemporaryFiles();
         var bad = MediaReferences.InspectFile(temp.Create("bad.wav", [1, 2, 3, 4]));
@@ -105,8 +105,8 @@ public sealed class MediaMetadataTests
             BuildWave(format: 7)));
         Assert.Null(unsupported.DurationTicks);
         var state = new TimelineState(0, Array.Empty<Clip>());
-        var planned = MediaReferences.PlanClip(state, bad, MediaTime.Zero, Guid.NewGuid());
-        Assert.Equal(MediaTime.FromSeconds(5), planned.Duration);
+        Assert.Throws<MediaReferenceException>(() =>
+            MediaReferences.PlanClip(state, bad, MediaTime.Zero, Guid.NewGuid()));
     }
 
     [Fact] public void TruncatedRiffChunkDoesNotCrashImport()

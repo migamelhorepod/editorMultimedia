@@ -14,7 +14,25 @@ public sealed class MediaRelinkTests
         public string Add(string name, byte[]? bytes = null)
         {
             var path = Path.Combine(Folder, name);
-            File.WriteAllBytes(path, bytes ?? [1, 2, 3]);
+            if (bytes is null && name.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                // A real, uncompressed 8-second mono WAV for relink success tests.
+                using var output = new BinaryWriter(File.Create(path));
+                output.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                output.Write(36 + 128000);
+                output.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+                output.Write(16);
+                output.Write((ushort)1);
+                output.Write((ushort)1);
+                output.Write(8000);
+                output.Write(16000);
+                output.Write((ushort)2);
+                output.Write((ushort)16);
+                output.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                output.Write(128000);
+                output.Write(new byte[128000]);
+            }
+            else File.WriteAllBytes(path, bytes ?? [1, 2, 3]);
             return path;
         }
         public void Dispose() => Directory.Delete(Folder, recursive: true);
@@ -31,7 +49,7 @@ public sealed class MediaRelinkTests
     {
         using var temp = new TempFiles();
         var first = MediaReferences.InspectFile(temp.Add("old.wav"));
-        var newPath = temp.Add("new.wav", [8, 7, 6, 5, 4]);
+        var newPath = temp.Add("new.wav");
         var baseState = Timeline();
         var original = new Clip(Guid.NewGuid(), first.Id, MediaKind.Audio, 2, T(3), T(4),
             AssociationKind.Positioned, baseState.Clips[0].Id, T(3), EffectsToken: "gain:0.4");
@@ -44,7 +62,7 @@ public sealed class MediaRelinkTests
         var updated = Assert.Single(session.Media);
         Assert.Equal(first.Id, updated.Id);
         Assert.Equal(newPath, updated.SourcePath);
-        Assert.Equal(5, updated.SizeBytes);
+        Assert.Equal(new FileInfo(newPath).Length, updated.SizeBytes);
         Assert.Equal("gain:0.4", session.Current.Find(original.Id).EffectsToken);
         var saved = ProjectStore.Deserialize(ProjectStore.Serialize(
             new EditorProject(Guid.NewGuid(), "Relink", session.Current, session.Media)));
@@ -110,8 +128,8 @@ public sealed class MediaRelinkTests
     public void UndoAndRedoRestoreMediaReferenceExactly()
     {
         using var temp = new TempFiles();
-        var a = MediaReferences.InspectFile(temp.Add("one.mp4"));
-        var b = temp.Add("two.mov");
+        var a = MediaReferences.InspectFile(temp.Add("one.wav"));
+        var b = temp.Add("two.wav");
         var session = new TimelineSession(Timeline(), [a]);
         session.RelinkMedia(a.Id, b);
         Assert.True(session.CanUndo);
@@ -128,8 +146,8 @@ public sealed class MediaRelinkTests
     public void TimelineAndCatalogShareOneChronologicalUndoHistory()
     {
         using var temp = new TempFiles();
-        var asset = MediaReferences.InspectFile(temp.Add("before.mp3"));
-        var newPath = temp.Add("after.m4a");
+        var asset = MediaReferences.InspectFile(temp.Add("before.wav"));
+        var newPath = temp.Add("after.wav");
         var session = new TimelineSession(Timeline());
         var clip = MediaReferences.PlanClip(session.Current, asset, T(2), Guid.NewGuid());
         session.Execute(s => TimelineEngine.Insert(s, s.Version, clip), [asset]);

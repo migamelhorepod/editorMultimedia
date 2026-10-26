@@ -15,7 +15,11 @@ public sealed class ProjectMediaCatalogTests
         {
             var path = Path.Combine(Folder, name);
             File.WriteAllBytes(path, [1, 2, 3, 4]);
-            return MediaReferences.InspectFile(path);
+            // These domain tests use synthetic metadata. MediaMetadataTests
+            // validates extraction from actual WAV and MP4 container bytes.
+            var asset = MediaReferences.InspectFile(path);
+            return asset.Kind is MediaKind.Audio or MediaKind.Video
+                ? asset with { DurationTicks = T(5).Ticks } : asset;
         }
         public void Dispose() => Directory.Delete(Folder, true);
     }
