@@ -137,17 +137,17 @@ Um caso com medição na interface é **inspeção lógica de edição**: esta P
 **Resultado:** [ ] Aprovado [ ] Reprovado [ ] Bloqueado [ ] N/A  
 **Evidência/observação:** ____________________
 
-### CT-014 — Não estender além do fim do arquivo | P0
+### CT-014 — Vídeo/áudio não podem ser esticados, nem dentro da fonte | P0
 **Pré-condição:** V2 ou A1 em duração integral, sem corte à direita, com fonte aferida.  
-**Passos:** (1) Tente arrastar a **borda direita para além** da duração original. (2) Solte. (3) Observe a duração, demais clipes e `Ctrl+Z`.  
-**Esperado:** operação rejeitada com aviso, sem crescimento do clipe, sem deslocamento de outros e **sem nova etapa de histórico**.  
+**Passos:** (1) Corte pela direita alguns segundos de um vídeo ou áudio. (2) Tente arrastar essa borda novamente para a direita, mesmo sem ultrapassar o fim original. (3) Solte.  
+**Esperado:** a mídia permanece encurtada; aparece aviso de que áudio/vídeo **não podem ser esticados**; nenhuma outra mídia ou histórico é alterado. Só **Restaurar duração original**, pelo clique direito, recupera a duração integral.  
 **Resultado:** [ ] Aprovado [ ] Reprovado [ ] Bloqueado [ ] N/A  
 **Evidência/observação:** ____________________
 
-### CT-015 — Não estender antes do primeiro segundo da fonte | P0
+### CT-015 — Borda esquerda também não pode esticar áudio/vídeo | P0
 **Pré-condição:** use um vídeo **não editado** que não seja o primeiro na principal, ou um áudio sem corte na secundária.  
-**Passos:** (1) Arraste a borda esquerda **para a esquerda** de seu ponto inicial, tentando aumentar a duração sem espaço de origem disponível. (2) Solte.  
-**Esperado:** nenhuma origem temporal negativa; operação rejeitada sem alterar o projeto nem histórico. **Não é permitido roubar duração do clipe anterior.**  
+**Passos:** (1) Corte alguns segundos da borda esquerda de um áudio ou vídeo. (2) Tente arrastá-la de volta para a esquerda para alongar a ocorrência. (3) Solte.  
+**Esperado:** a duração **não aumenta**, mesmo quando existe trecho disponível da fonte à esquerda; a posição dos demais clipes não muda e a operação é recusada sem criar histórico.  
 **Resultado:** [ ] Aprovado [ ] Reprovado [ ] Bloqueado [ ] N/A  
 **Evidência/observação:** ____________________
 
@@ -287,3 +287,16 @@ Reproduzível? Sempre / Intermitente
 ```
 
 **Observação:** estes são testes **manuais de aceitação**. Os testes automatizados de .NET continuam no projeto de testes e não substituem os casos com MP3, interface WPF e arquivos reais.
+
+
+## Complemento visual rápido — Regra de não esticar áudio/vídeo
+
+| Caso | O que testar na interface WPF | Resultado esperado |
+|---|---|---|
+| UI-06A | Importar áudio e vídeo com duração real e arrastar borda esquerda/direita **para encurtar** | Corte aplicado e trecho de origem coerente |
+| UI-06B | Após um corte, arrastar a borda **direita para alongar** áudio/vídeo | Não cresce; mostra aviso e orienta restaurar a duração original |
+| UI-06C | Após um corte, arrastar a borda **esquerda para alongar** áudio/vídeo | Não cresce; histórico e outros clipes inalterados |
+| UI-07 | Clique direito no clipe > **Restaurar duração original** | Duração real volta, recorte da origem é zerado e a ação pode ser desfeita/refeita |
+| UI-05 | Aumentar e diminuir a duração de uma imagem estática pela borda | Continua permitido, pois a imagem não possui duração temporal natural |
+
+**Regra:** “encurtar” pode ser feito repetidamente; **“esticar” áudio/vídeo por arraste é sempre proibido**, mesmo quando ainda sobra parte do arquivo original. A restauração completa só pode ocorrer por comando explícito.

@@ -16,10 +16,10 @@
 | Imagem | Uma imagem estática permanece com duração editável inicial de 4 s; não possui recorte de origem temporal. |
 | Tempo visual | Apresentar `HH:MM:SS[,fff]` no catálogo, timeline, régua e barra de status. Não arredondar valores persistidos. |
 | Fonte e clipe | `SourceStart` = início real dentro do arquivo; `Duration` = extensão temporal da ocorrência; `SourceEnd` = soma exata. |
-| Corte à esquerda | Consumir quadros/amostras a partir do começo da fonte; novo `SourceStart` avança, `Duration` encurta. |
-| Corte à direita | `SourceStart` não muda; `Duration` varia. Nenhum novo intervalo pode exceder a fonte conhecida. |
+| Corte à esquerda | Consumir quadros/amostras a partir do começo da fonte; novo `SourceStart` avança, `Duration` encurta. Não esticar áudio ou vídeo. |
+| Corte à direita | `SourceStart` não muda; só é permitido **encurtar** áudio e vídeo. Imagens estáticas podem ter o tempo de exibição aumentado ou diminuído. |
 | Divisão | Clipes resultantes usam intervalos de origem contíguos, sem recomeçar o lado direito em 00:00. |
-| Restauração da fonte | Comando explícito `Restaurar duração original` zera `SourceStart`, recupera a duração total e aplica ondulação à trilha principal. |
+| Restauração da fonte | Única exceção para recuperar a duração cortada: comando explícito **Restaurar duração original** (clique direito), que zera `SourceStart` e recupera a duração total aferida; aplica ondulação à principal. |
 | Associação | Posicionadas acompanham pai; independentes ficam em tempo absoluto. Avisos de vínculo perdido persistem até movimento. |
 | Colisão | Tenta outra trilha secundária; se todas ocupadas, erro e alteração atômica (mensagem existente). |
 | Histórico | Todas as operações mutantes acima integram Ctrl+Z/Y com uma etapa por gesto/comando. |
@@ -75,7 +75,8 @@ Marque cada caso após exercitar o aplicativo. A homologação exige que todos o
 - [ ] Importar imagem; duração inicial 4 s, alterar sua duração e dividir, sem `SourceStart` diferente de zero.
 - [ ] Cortar 2 s da esquerda de um vídeo, conferir início na fonte e duração. Cortar à direita não altera início na fonte.
 - [ ] Dividir o vídeo, conferir que o segundo clipe começa no instante correspondente na fonte e que o total da timeline permanece coerente.
-- [ ] Tentar aumentar um clipe além do fim da fonte e tentar estender pela esquerda antes do início; deve rejeitar sem modificar outras mídias.
+- [ ] Encurtar áudio e vídeo pela esquerda e direita; tentar aumentá-los mesmo **dentro da duração original**, por qualquer borda. Deve recusar sem criar histórico. Imagens estáticas ainda podem ser esticadas para aumentar o tempo de exibição.
+- [ ] Usar clique direito > **Restaurar duração original** num clipe encurtado, verificando duração real, posição da origem, ondulação e Ctrl+Z/Y.
 - [ ] Reordenar principais; mídias posicionadas acompanham seu pai e independentes permanecem em tempo absoluto.
 - [ ] Provocar colisão com múltiplas secundárias; verificar realocação para a primeira trilha livre. Com todas as 9 ocupadas, deve mostrar aviso e não alterar estado.
 - [ ] Criar, arrastar e remover marcador; usar as setas e zoom; encaixe inicia **desligado**.

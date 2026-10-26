@@ -8,6 +8,8 @@ public sealed class TimelineTests
     private static MediaTime T(int seconds) => MediaTime.FromSeconds(seconds);
     private static Clip C(int track, int start, int duration, Guid? id = null) =>
         new(id ?? Guid.NewGuid(), Guid.NewGuid(), MediaKind.Video, track, T(start), T(duration));
+    private static Clip C(int track, int start, int duration, MediaKind kind) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), kind, track, T(start), T(duration));
     private static TimelineState S(params Clip[] clips) => new(0, clips);
 
     [Fact] public void InsertAutomaticallyAssociatesSecondaryAtMainStart()
