@@ -1318,6 +1318,7 @@ public partial class MainWindow : Window
         var main = draggingMain;
         var target = previewMainIndex;
         var valid = previewError is null;
+        var resizeFailure = previewError;
         var seconds = dragPreviewSeconds;
         var track = dragPreviewTrack;
         draggingId = null;
@@ -1329,7 +1330,16 @@ public partial class MainWindow : Window
         previewError = null;
         resolvedPreviewTrack = null;
         Surface.ReleaseMouseCapture();
-        if (commit && id is Guid clipId)
+        if (commit && resize && resizeFailure == "TEMPORAL_STRETCH")
+        {
+            MessageBox.Show(this,
+                "Áudios e vídeos só podem ser cortados ou encurtados na timeline.\n\n" +
+                "Para recuperar a duração completa, clique com o botão direito no clipe " +
+                "e selecione 'Restaurar duração original'.",
+                "Não é possível esticar a mídia",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else if (commit && id is Guid clipId)
         {
             if (resize && valid && (leftEdge
                 ? finalResizeStart != originalResizeStart

@@ -92,15 +92,16 @@ public sealed class TimelineSession
             throw new MediaReferenceException(
                 "A duração real desta mídia não pôde ser determinada. " +
                 "Nenhum corte foi alterado.");
-        if (clip.Duration.Ticks == ticks && Media.SequenceEqual(refreshed))
+        if (clip.Duration.Ticks == ticks && clip.SourceStart == MediaTime.Zero &&
+            Media.SequenceEqual(refreshed))
             return;
 
         var desired = new MediaTime(ticks);
         Execute(state =>
         {
             var adjusted = clip.Track == TimelineEngine.MainTrack
-                ? TimelineEngine.ResizeMain(state, state.Version, clip.Id, desired)
-                : TimelineEngine.ResizeSecondary(state, state.Version, clip.Id, desired);
+                ? TimelineEngine.RestoreMainDuration(state, state.Version, clip.Id, desired)
+                : TimelineEngine.RestoreSecondaryDuration(state, state.Version, clip.Id, desired);
             var clips = adjusted.State.Clips.Select(c => c.Id == clip.Id
                 ? c with { SourceStart = MediaTime.Zero } : c).ToArray();
             var next = adjusted.State with { Clips = clips };
