@@ -109,6 +109,31 @@ public sealed class ProjectMediaCatalogTests
     }
 
     [Fact]
+    public void AClipCanBeDeletedButCatalogRemovalWaitsUntilEveryOccurrenceIsGone()
+    {
+        using var tmp = new TempSource();
+        var asset = tmp.Make("duplicated.wav");
+        var first = new Clip(Guid.NewGuid(), asset.Id, MediaKind.Audio, 1, T(0), T(3));
+        var second = new Clip(Guid.NewGuid(), asset.Id, MediaKind.Audio, 2, T(0), T(3));
+        var session = new TimelineSession(new TimelineState(0, [first, second]), [asset]);
+
+        Assert.Throws<MediaReferenceException>(() => session.RemoveUnusedMedia(asset.Id));
+        session.Execute(s => TimelineEngine.DeleteSecondary(s, s.Version, first.Id));
+        Assert.Single(session.Current.Clips);
+        Assert.Equal(asset, Assert.Single(session.Media));
+        Assert.Throws<MediaReferenceException>(() => session.RemoveUnusedMedia(asset.Id));
+
+        session.Execute(s => TimelineEngine.DeleteSecondary(s, s.Version, second.Id));
+        Assert.Empty(session.Current.Clips);
+        Assert.Equal(asset, Assert.Single(session.Media));
+        session.RemoveUnusedMedia(asset.Id);
+        Assert.Empty(session.Media);
+        Assert.True(File.Exists(asset.SourcePath));
+        session.Undo();
+        Assert.Equal(asset, Assert.Single(session.Media));
+    }
+
+    [Fact]
     public void RemovingUnusedCatalogEntryDoesNotDeleteSourceFile()
     {
         using var tmp = new TempSource();

@@ -113,18 +113,18 @@ public sealed class LeftTrimTests
         TimelineEngine.Validate(state);
     }
 
-    [Fact] public void MainLeftTrimLeftwardCannotStretchVideoOrMoveFollowing()
+    [Fact] public void MainLeftTrimLeftwardCanRestoreTrimmedFramesAndPushFollowing()
     {
         var previous = C(0, 0, 8);
-        var selected = C(0, 8, 9);
+        var selected = C(0, 8, 9) with { SourceStart = T(3) };
         var following = C(0, 17, 7);
         var state = S(previous, selected, following);
-        var error = Assert.Throws<TimelineException>(() =>
-            TimelineEngine.TrimMainLeft(state, 0, selected.Id, T(6)));
-        Assert.Equal("TEMPORAL_STRETCH", error.Code);
-        Assert.Equal(previous, state.Find(previous.Id));
-        Assert.Equal(selected, state.Find(selected.Id));
-        Assert.Equal(following, state.Find(following.Id));
+        var after = TimelineEngine.TrimMainLeft(state, 0, selected.Id, T(6)).State;
+        Assert.Equal(previous, after.Find(previous.Id));
+        Assert.Equal(T(11), after.Find(selected.Id).Duration);
+        Assert.Equal(T(1), after.Find(selected.Id).SourceStart);
+        Assert.Equal(T(19), after.Find(following.Id).Start);
+        Assert.Equal(following.Duration, after.Find(following.Id).Duration);
     }
 
     [Fact] public void MainLeftTrimDoesNotAffectPreviousParentOrItsPositionedMedia()
