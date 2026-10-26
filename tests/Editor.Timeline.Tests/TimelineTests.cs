@@ -205,7 +205,7 @@ public sealed class TimelineTests
 
     [Fact] public void SecondaryExtensionMovesToFirstAvailableTrack()
     {
-        var a = C(1, 0, 3); var obstacle = C(1, 4, 5);
+        var a = C(1, 0, 3, MediaKind.Image); var obstacle = C(1, 4, 5);
         var result = TimelineEngine.ResizeSecondary(S(a,obstacle), 0, a.Id, T(6)).State;
         Assert.Equal(2, result.Find(a.Id).Track);
         Assert.Equal(T(6), result.Find(a.Id).Duration);
@@ -213,7 +213,7 @@ public sealed class TimelineTests
 
     [Fact] public void SecondaryExtensionFailsAtomicallyWithAllTracksBlocked()
     {
-        var a = C(1, 0, 3); var obstacle = C(1, 4, 5);
+        var a = C(1, 0, 3, MediaKind.Image); var obstacle = C(1, 4, 5);
         var blockers = Enumerable.Range(2,8).Select(t => C(t,0,10)).ToArray();
         var original = S([a,obstacle,..blockers]);
         var error = Assert.Throws<TimelineException>(() => TimelineEngine.ResizeSecondary(original, 0, a.Id, T(6)));
@@ -659,7 +659,7 @@ public sealed class TimelineTests
         var audio = new Clip(Guid.NewGuid(), Guid.NewGuid(), MediaKind.Audio, 4,
             T(12), T(3), AssociationKind.Positioned, b.Id, T(2));
         var fixedImage = C(5, 21, 3);
-        var state = TimelineEngine.ResizeMain(S(a, b, audio, fixedImage), 0, a.Id, T(14)).State;
+        var state = TimelineEngine.RestoreMainDuration(S(a, b, audio, fixedImage), 0, a.Id, T(14)).State;
         Assert.Equal(T(14), state.Find(a.Id).Duration);
         Assert.Equal(T(14), state.Find(b.Id).Start);
         Assert.Equal(T(16), state.Find(audio.Id).Start);
@@ -698,7 +698,7 @@ public sealed class TimelineTests
 
     [Fact] public void ResizeSecondaryCollisionMovesToFirstAvailableTrack()
     {
-        var moved = C(2, 1, 2);
+        var moved = C(2, 1, 2, MediaKind.Image);
         var blocker = C(2, 5, 6);
         var firstLaneBusy = C(1, 4, 1);
         var result = TimelineEngine.ResizeSecondary(S(moved, blocker, firstLaneBusy), 0,
@@ -711,7 +711,7 @@ public sealed class TimelineTests
 
     [Fact] public void ResizeSecondaryFailsAtomicallyWhenAllTenTracksUnavailable()
     {
-        var moved = C(1, 0, 2);
+        var moved = C(1, 0, 2, MediaKind.Image);
         var blockers = Enumerable.Range(1, 9).Select(t => C(t, 3, 4)).ToArray();
         var session = new TimelineSession(S([moved, ..blockers]));
         var error = Assert.Throws<TimelineException>(() => session.Execute(state =>
@@ -727,13 +727,13 @@ public sealed class TimelineTests
     [InlineData(MediaKind.Audio)]
     [InlineData(MediaKind.Image)]
     [InlineData(MediaKind.Video)]
-    public void ResizeRightEdgeSupportsAudioImageAndVideo(MediaKind kind)
+    public void ResizeRightEdgeCanShortenAudioImageAndVideo(MediaKind kind)
     {
         var clip = new Clip(Guid.NewGuid(), Guid.NewGuid(), kind, 7, T(2), T(3));
         var result = TimelineEngine.ResizeSecondary(S(clip), 0, clip.Id,
-            MediaTime.FromSeconds(4.5m)).State.Find(clip.Id);
+            MediaTime.FromSeconds(1.5m)).State.Find(clip.Id);
         Assert.Equal(kind, result.Kind);
-        Assert.Equal(MediaTime.FromSeconds(4.5m), result.Duration);
+        Assert.Equal(MediaTime.FromSeconds(1.5m), result.Duration);
         Assert.Equal(T(2), result.Start);
     }
 
@@ -743,9 +743,9 @@ public sealed class TimelineTests
         var second = C(0, 6, 6);
         var session = new TimelineSession(S(first, second));
         var visual = TimelineEngine.PreviewResizeMain(session.Current,
-            session.Current.Version, first.Id, T(9));
-        Assert.Equal(T(9), visual.State.Find(first.Id).Duration);
-        Assert.Equal(T(9), visual.State.Find(second.Id).Start);
+            session.Current.Version, first.Id, T(4));
+        Assert.Equal(T(4), visual.State.Find(first.Id).Duration);
+        Assert.Equal(T(4), visual.State.Find(second.Id).Start);
         Assert.Equal(T(6), session.Current.Find(first.Id).Duration);
         Assert.Equal(T(6), session.Current.Find(second.Id).Start);
         Assert.False(session.CanUndo);
@@ -754,7 +754,7 @@ public sealed class TimelineTests
 
     [Fact] public void ResizeSecondaryPreviewShowsAutomaticRelocationWithoutCommit()
     {
-        var moving = C(1, 2, 2);
+        var moving = C(1, 2, 2, MediaKind.Image);
         var fixedClip = C(1, 5, 3);
         var session = new TimelineSession(S(moving, fixedClip));
         var ghost = TimelineEngine.PreviewResizeSecondary(session.Current,
@@ -767,7 +767,7 @@ public sealed class TimelineTests
 
     [Fact] public void ResizeSecondaryCanUndoAndRedoTrackAndDuration()
     {
-        var moving = C(1, 0, 2);
+        var moving = C(1, 0, 2, MediaKind.Image);
         var obstacle = C(1, 3, 3);
         var session = new TimelineSession(S(moving, obstacle));
         session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, moving.Id, T(4)));
@@ -806,7 +806,7 @@ public sealed class TimelineTests
     {
         var orphan = C(5, 7, 2) with { OrphanNotice = true };
         var session = new TimelineSession(S(orphan));
-        session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, orphan.Id, T(4)));
+        session.Execute(s => TimelineEngine.ResizeSecondary(s, s.Version, orphan.Id, T(1)));
         Assert.True(session.Current.Find(orphan.Id).OrphanNotice);
         session.Undo();
         Assert.True(session.Current.Find(orphan.Id).OrphanNotice);
