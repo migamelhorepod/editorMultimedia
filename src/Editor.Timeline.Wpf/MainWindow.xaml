@@ -7,6 +7,8 @@
         <MenuItem Header="Carregar demonstração" Click="NewDemo_Click"/>
         <MenuItem Header="Abrir projeto..." Click="OpenProject_Click" InputGestureText="Ctrl+O"/>
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
+        <MenuItem Header="Ativar outra biblioteca..." Click="ChangeLibrary_Click"/>
+        <MenuItem Header="Desativar biblioteca" Click="DeactivateLibrary_Click"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
         <MenuItem Header="Relocalizar mídia selecionada..." Click="RelinkSelectedMedia_Click"/>
         <Separator/>
