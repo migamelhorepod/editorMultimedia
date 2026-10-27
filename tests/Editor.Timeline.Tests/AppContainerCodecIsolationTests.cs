@@ -47,7 +47,18 @@ public sealed class AppContainerCodecIsolationTests
             using var acl = Process.Start(start)!;
             Assert.True(acl.WaitForExit(5000));
             Assert.Equal(0, acl.ExitCode);
-            int result = WindowsAppContainerLauncher.RunCodecIsolationProbe(worker, wav, useFfmpeg);
+            var library = Guid.NewGuid();
+            var task = Guid.NewGuid();
+            var resource = Guid.NewGuid();
+            var grants = new AccessGrantRegistry(library);
+            var catalog = new AuthorizedMediaCatalog(Path.GetDirectoryName(wav)!, grants);
+            catalog.Register(resource, wav);
+            var grant = grants.Issue(task, library, resource,
+                MediaAccessOperation.InspectMetadata, TimeSpan.FromMinutes(1));
+            var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
+                task, library, resource, grant, MediaAccessOperation.InspectMetadata);
+            int result = WindowsAppContainerLauncher.RunAuthorizedCodecIsolationProbe(
+                worker, catalog, request, useFfmpeg);
             Assert.True(result == 0, $"Sandboxed codec returned {result}.");
         }
         finally
