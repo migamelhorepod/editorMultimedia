@@ -490,6 +490,42 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private bool ConfirmCatalogDeletion()
+    {
+        var prompt = new Window
+        {
+            Title = "Confirmar exclusão",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = 470,
+            ShowInTaskbar = false
+        };
+        var body = new StackPanel { Margin = new Thickness(20) };
+        body.Children.Add(new TextBlock
+        {
+            Text = "Se a mídia for excluída do catálogo, também será removida da timeline, quer mesmo excluir?",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 510,
+            Margin = new Thickness(0, 0, 0, 18)
+        });
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        var cancel = new Button { Content = "Cancelar", MinWidth = 95, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var confirm = new Button { Content = "Confirmar", MinWidth = 95, IsDefault = true };
+        cancel.Click += (_, _) => prompt.DialogResult = false;
+        confirm.Click += (_, _) => prompt.DialogResult = true;
+        actions.Children.Add(cancel);
+        actions.Children.Add(confirm);
+        body.Children.Add(actions);
+        prompt.Content = body;
+        return prompt.ShowDialog() == true;
+    }
+
     private void DeleteCatalogMedia(Guid mediaId)
     {
         var media = mediaAssets.FirstOrDefault(m => m.Id == mediaId);
@@ -497,10 +533,7 @@ public partial class MainWindow : Window
         var used = session.Current.Clips.Any(c => c.MediaId == mediaId);
         if (used)
         {
-            var choice = MessageBox.Show(this,
-                "Se a mídia for excluída do catálogo, também será removida da timeline, quer mesmo excluir?",
-                "Confirmar exclusão", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-            if (choice != MessageBoxResult.OK) return;
+            if (!ConfirmCatalogDeletion()) return;
         }
         try
         {
