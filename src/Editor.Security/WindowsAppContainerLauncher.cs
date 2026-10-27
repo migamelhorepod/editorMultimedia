@@ -75,8 +75,21 @@ public static class WindowsAppContainerLauncher
                 new CancellationTokenSource(TimeSpan.FromSeconds(6)).Token));
     }
 
+    public static (int exitCode, int processId) RunExternalNetworkProbeObserved(string workerExecutable)
+    {
+        int pid = 0;
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
+            StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Unexpected network diagnostic executable.");
+        int exitCode = LaunchDiagnostic(workerExecutable, "--probe-external-network", true,
+            null, verifiedPid => pid = verifiedPid);
+        if (pid <= 0) throw new InvalidOperationException("No verified AppContainer process was created.");
+        return (exitCode, pid);
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
-        Func<int, Task<WorkerResponse>>? authenticatedServer = null)
+        Func<int, Task<WorkerResponse>>? authenticatedServer = null,
+        Action<int>? processVerified = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -201,6 +214,7 @@ public static class WindowsAppContainerLauncher
             {
                 CloseHandle(token);
             }
+            processVerified?.Invoke(checked((int)process.dwProcessId));
             if (!run) return checked((int)process.dwProcessId);
             Task<WorkerResponse>? serverTask = authenticatedServer?.Invoke(checked((int)process.dwProcessId));
             if (ResumeThread(process.hThread) == uint.MaxValue)
