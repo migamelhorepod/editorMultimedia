@@ -1,6 +1,7 @@
 param(
     [string] $OutputPath = "TestResults/sec-006-wfp-audit.json",
     [string] $WorkerPath = "",
+    [int] $WorkerProcessId = 0,
     [string] $DestinationAddress = "1.1.1.1",
     [int] $DestinationPort = 443,
     [string] $ProbeStartUtc = "",
@@ -28,7 +29,9 @@ try {
         if (-not $destination) { $destination = $fields['DestinationAddress'] }
         if (-not $port) { $port = $fields['DestinationPort'] }
         $workerMatches = $WorkerPath -and $pathValue -and ([string]::Equals($pathValue, $WorkerPath, [StringComparison]::OrdinalIgnoreCase))
-        if ($event.Id -eq 5157 -and $workerMatches -and $destination -eq $DestinationAddress -and $port -eq "$DestinationPort") {
+        if ($event.Id -eq 5157 -and $workerMatches -and $WorkerProcessId -gt 0 -and
+            $fields['ProcessID'] -eq "$WorkerProcessId" -and
+            $destination -eq $DestinationAddress -and $port -eq "$DestinationPort") {
             $matches += [ordered]@{eventId=$event.Id;timeUtc=$event.TimeCreated.ToUniversalTime().ToString('o');application=$pathValue;destination=$destination;port=$port;processId=$fields['ProcessID'];filterRunTimeId=$fields['FilterRTID']}
         }
     }
@@ -45,6 +48,7 @@ $report = [ordered]@{
     destinationAddress = $DestinationAddress
     destinationPort = $DestinationPort
     workerPath = $WorkerPath
+    workerProcessId = $WorkerProcessId
     eventCount = @($events).Count
     eventReadError = $errorText
     correlatedDeniedEvents = @($matches)
