@@ -91,7 +91,9 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
-if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" || args[0] == "--process-metadata" || args[0] == "--process-decode"))
+if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" ||
+    args[0] == "--process-metadata" || args[0] == "--process-decode")) ||
+    (args.Length == 4 && args[0] == "--process-metadata-report"))
 {
     if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
     if (!Path.IsPathFullyQualified(args[1])) return 71;
@@ -143,7 +145,20 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
                 (!double.IsFinite(duration) || (args[0] == "--process-metadata" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)))
-                return 79; // ffprobe must decode metadata of the granted 0.10 s WAV.
+                return 79; // Reject missing or invalid metadata values.
+            if (args[0] == "--process-metadata-report")
+            {
+                if (!Guid.TryParseExact(args[3], "N", out Guid requestId) ||
+                    requestId == Guid.Empty ||
+                    !double.IsFinite(duration) || duration <= 0 || duration > 604800)
+                    return 71;
+                long ticks = checked((long)Math.Round(duration * TimeSpan.TicksPerSecond));
+                var report = new WindowsWorkerMetadataPipe.MetadataReport(
+                    WorkerRequest.CurrentVersion, requestId, ticks);
+                using var reportTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                await WindowsWorkerMetadataPipe.SubmitOnceAsync(
+                    args[2], report, reportTimeout.Token);
+            }
         }
         return 0;
     }
