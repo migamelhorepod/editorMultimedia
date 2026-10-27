@@ -312,6 +312,11 @@ public partial class MainWindow : Window
             $"{added} arquivo(s) vinculado(s) à timeline",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        }
+        finally
+        {
+            importCoordinator.CompleteImport(importTask);
+        }
     }
 
 
