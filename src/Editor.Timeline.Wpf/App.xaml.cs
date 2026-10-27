@@ -9,6 +9,13 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            args.Handled = true;
+            MessageBox.Show("Ocorreu uma falha e o aplicativo precisará ser finalizado",
+                "Falha no aplicativo", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+        };
         try
         {
             var recoveryRoot = Path.Combine(
