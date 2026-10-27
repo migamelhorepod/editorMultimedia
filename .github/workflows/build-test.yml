@@ -168,7 +168,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: resultados-testes
-          path: TestResults
+          path: .
       - name: Verificar provas de seguranca antes do merge
         shell: pwsh
         run: |
