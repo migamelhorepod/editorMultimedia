@@ -35,6 +35,7 @@ public static class WindowsAppContainerLauncher
 
         IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, capabilitiesPtr = IntPtr.Zero;
         PROCESS_INFORMATION process = default;
+        WindowsWorkerJob? resourceJob = null;
         bool initialized = false;
         try
         {
@@ -75,6 +76,8 @@ public static class WindowsAppContainerLauncher
                 IntPtr.Zero, Environment.SystemDirectory, ref startup, out process))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     "Windows refused the AppContainer diagnostic process.");
+            // Assign hard resource limits before any code could run.
+            resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
@@ -96,6 +99,7 @@ public static class WindowsAppContainerLauncher
         }
         finally
         {
+            resourceJob?.Dispose();
             if (process.hProcess != IntPtr.Zero)
             {
                 TerminateProcess(process.hProcess, 1);
