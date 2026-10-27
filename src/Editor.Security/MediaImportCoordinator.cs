@@ -40,7 +40,7 @@ public sealed class MediaImportCoordinator
     {
         lock (gate)
         {
-            if (!active.Remove(taskId))
+            if (!active.Remove(taskId) && !unavailable)
                 throw new InvalidOperationException("Import task is not active.");
         }
     }
