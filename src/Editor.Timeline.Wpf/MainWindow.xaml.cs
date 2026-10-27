@@ -315,12 +315,17 @@ public partial class MainWindow : Window
                 {
                     asset = await Task.Run(() => MediaReferences.InspectFile(stored.Path));
                 }
-                catch (MediaReferenceException)
+                catch (Exception ex) when (ex is MediaReferenceException or
+                    NotSupportedException or InvalidDataException or ArgumentException)
                 {
-                    // An undecodable NEW import must not pollute the library.
-                    // Existing/reused media is never deleted by this action.
-                    if (stored.NewlyCopied && File.Exists(stored.Path))
-                        File.Delete(stored.Path);
+                    // An invalid NEW import must not pollute the library.
+                    // Existing/reused media and the original are never deleted.
+                    if (stored.NewlyCopied)
+                    {
+                        try { if (File.Exists(stored.Path)) File.Delete(stored.Path); }
+                        catch (IOException) { /* The import error remains primary. */ }
+                        catch (UnauthorizedAccessException) { /* Cleanup may retry during maintenance. */ }
+                    }
                     throw;
                 }
                 if (libraryStorageMonitor is not null && !libraryStorageMonitor.Check())
