@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using Editor.Timeline;
 using Editor.Security;
+using System.Windows.Threading;
 
 namespace Editor.Timeline.Wpf;
 
@@ -30,6 +31,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, bool> availableMedia = new();
     private Guid? catalogSelectionId;
     private readonly MediaImportCoordinator importCoordinator = new(Guid.NewGuid());
+    private LibraryStorageMonitor? libraryStorageMonitor;
+    private readonly DispatcherTimer storageTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly Dictionary<Guid, IDisposable> activeWorkerJobs = new();
 
     // A project catalog entry may have zero, one or many timeline occurrences.
     private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
@@ -89,6 +93,13 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        storageTimer.Tick += (_, _) =>
+        {
+            if (libraryStorageMonitor is null) return;
+            if (!libraryStorageMonitor.Check())
+                foreach (var media in mediaAssets) availableMedia[media.Id] = false;
+        };
+        storageTimer.Start();
         session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
         savedState = session.Current;
         projectId = Guid.NewGuid();
@@ -563,13 +574,42 @@ public partial class MainWindow : Window
     private void SaveProject_Click(object sender, RoutedEventArgs e) => SaveProject();
     private void SaveAsProject_Click(object sender, RoutedEventArgs e) => SaveProject(choosePath: true);
 
+    private void ChangeLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        if (importCoordinator.ActiveImports > 0)
+        {
+            ShowBusyLibraryModal();
+            return;
+        }
+        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "Selecionar biblioteca de mídias" };
+        if (picker.ShowDialog(this) != true) return;
+        var result = importCoordinator.TryChangeLibrary(Guid.NewGuid());
+        if (!result.Allowed) { ShowBusyLibraryModal(); return; }
+        libraryStorageMonitor = new LibraryStorageMonitor(importCoordinator, picker.FolderName,
+            id =>
+            {
+                if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
+            });
+        libraryStorageMonitor.Check();
+    }
+
+    private void DeactivateLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        var result = importCoordinator.TryChangeLibrary(null);
+        if (!result.Allowed) { ShowBusyLibraryModal(); return; }
+        libraryStorageMonitor = null;
+    }
+
+    private void ShowBusyLibraryModal() =>
+        MessageBox.Show(this, MediaImportCoordinator.BusyMessage,
+            "Biblioteca em processamento", MessageBoxButton.OK, MessageBoxImage.Information);
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         if (importCoordinator.ActiveImports > 0)
         {
             e.Cancel = true;
-            MessageBox.Show(this, MediaImportCoordinator.BusyMessage,
-                "Importação em andamento", MessageBoxButton.OK, MessageBoxImage.Information);
+            ShowBusyLibraryModal();
             return;
         }
         if (!ConfirmBeforeReplacingProject()) e.Cancel = true;
