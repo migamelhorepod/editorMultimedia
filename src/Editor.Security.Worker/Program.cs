@@ -91,11 +91,11 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
-if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" || args[0] == "--process-metadata"))
+if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" || args[0] == "--process-metadata" || args[0] == "--process-decode"))
 {
     if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
     if (!Path.IsPathFullyQualified(args[1])) return 71;
-    string tool = args[0] == "--probe-ffmpeg" ? "ffmpeg.exe" : "ffprobe.exe";
+    string tool = args[0] is "--probe-ffmpeg" or "--process-decode" ? "ffmpeg.exe" : "ffprobe.exe";
     string executable = Path.Combine(AppContext.BaseDirectory, tool);
     if (!File.Exists(executable)) return 75;
     var start = new ProcessStartInfo(executable)
