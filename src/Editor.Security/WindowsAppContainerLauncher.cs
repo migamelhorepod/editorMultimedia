@@ -36,14 +36,14 @@ public static class WindowsAppContainerLauncher
     public static int RunDeniedFileProbe(string workerExecutable, string protectedFile)
     {
         if (!Path.IsPathFullyQualified(protectedFile) || !File.Exists(protectedFile) ||
-            protectedFile.Contains(\'"\') || protectedFile.Contains(\'\\n\') ||
-            protectedFile.Contains(\'\\r\'))
+            protectedFile.IndexOf((char)34) >= 0 || protectedFile.IndexOf((char)10) >= 0 ||
+            protectedFile.IndexOf((char)13) >= 0)
             throw new ArgumentException("Existing absolute test fixture required.", nameof(protectedFile));
         if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
             StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Only the dedicated worker executable is permitted.");
         return LaunchDiagnostic(workerExecutable,
-            "--probe-denied-file \\"" + protectedFile + "\\"", true);
+            "--probe-denied-file " + ((char)34) + protectedFile + ((char)34), true);
     }
 
     public static int RunDeniedNetworkProbe(string workerExecutable, int port)
@@ -70,8 +70,8 @@ public static class WindowsAppContainerLauncher
             string.Equals(arguments, "/c exit 0", StringComparison.Ordinal);
         var isWorkerProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
-            arguments.StartsWith("--probe-denied-file \\"", StringComparison.Ordinal) &&
-            arguments.EndsWith("\\"", StringComparison.Ordinal) && run;
+            arguments.StartsWith("--probe-denied-file " + ((char)34), StringComparison.Ordinal) &&
+            arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
         var isNetworkProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-denied-network ", StringComparison.Ordinal) && run;
