@@ -68,6 +68,10 @@ jobs:
           Copy-Item (Join-Path $source "ffprobe.exe") "TestResults/sandbox-worker/ffprobe.exe"
           Copy-Item (Join-Path $source "ffmpeg.exe") "TestResults/sandbox-worker/ffmpeg.exe"
 
+      - name: Empacotar worker real para aplicativo WPF
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/preparar-worker-appcontainer.ps1 -Configuration Release
+
       - name: Conceder somente leitura e execucao do bundle ao AppContainer
         shell: pwsh
         run: |
