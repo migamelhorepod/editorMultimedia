@@ -15,7 +15,20 @@ public static class WindowsAppContainerLauncher
     private const uint CreateSuspended = 0x00000004;
     private static readonly nuint SecurityCapabilitiesAttribute = 0x00020009;
 
-    public static int StartSuspended(string executable, string arguments)
+    public static int StartSuspended(string executable, string arguments) =>
+        LaunchDiagnostic(executable, arguments, false);
+
+    /// <summary>
+    /// Execute only the fixed inert Windows diagnostic INSIDE AppContainer.
+    /// Returns process exit status, not proof of media filesystem isolation.
+    /// </summary>
+    public static int RunRestrictedDiagnostic()
+    {
+        var executable = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        return LaunchDiagnostic(executable, "/c exit 0", true);
+    }
+
+    private static int LaunchDiagnostic(string executable, string arguments, bool run)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -94,8 +107,15 @@ public static class WindowsAppContainerLauncher
             {
                 CloseHandle(token);
             }
-            // Never resume this process: OS access probes remain pending.
-            return checked((int)process.dwProcessId);
+            if (!run) return checked((int)process.dwProcessId);
+            if (ResumeThread(process.hThread) == uint.MaxValue)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume restricted process.");
+            uint wait = WaitForSingleObject(process.hProcess, 5000);
+            if (wait != 0)
+                throw new InvalidOperationException("Restricted diagnostic failed to exit in time.");
+            if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return checked((int)exitCode);
         }
         finally
         {
@@ -173,6 +193,12 @@ public static class WindowsAppContainerLauncher
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool GetTokenInformation(IntPtr token, int informationClass,
         out int information, int length, out int returnLength);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
     [DllImport("kernel32.dll")]
     private static extern bool TerminateProcess(IntPtr process, uint exitCode);
     [DllImport("kernel32.dll")]
