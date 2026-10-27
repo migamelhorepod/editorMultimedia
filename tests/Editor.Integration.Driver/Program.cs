@@ -80,6 +80,12 @@ foreach (var command in commands)
                 ? TimelineEngine.DeleteMain(s, s.Version, Id()) : TimelineEngine.DeleteSecondary(s, s.Version, Id())); break;
             case "removeMedia": session.RemoveUnusedMedia(Id()); break;
             case "deleteCatalog": session.DeleteCatalogMedia(Id("mediaId")); break;
+            case "deleteCatalogFirst":
+                session.DeleteCatalogMedia(session.Media.First().Id); break;
+            case "insertFirstCatalog":
+                var firstAsset = session.Media.First();
+                var secondClip = MediaReferences.PlanClip(session.Current, firstAsset, Time(), Id());
+                session.Execute(s => TimelineEngine.Insert(s, s.Version, secondClip)); break;
             case "relink": session.RelinkMedia(Id(), Text("path")); break;
             case "restore": session.FitClipToSource(Id()); break;
             case "undo": session.Undo(); break;
