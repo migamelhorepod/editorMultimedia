@@ -23,6 +23,17 @@ public sealed class RestrictedWorkerPipePolicyTests
     }
 
     [Fact]
+    public void CanCreatePipeWithActualRestrictedSecurityDescriptor()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var controller = WindowsIdentity.GetCurrent().User!;
+        var worker = new SecurityIdentifier(WindowsAppContainerPreflight.DerivePackageSid());
+        string pipe = WindowsWorkerPipe.Prefix + Guid.NewGuid().ToString("N");
+        using var endpoint = RestrictedWorkerPipePolicy.CreateEndpoint(pipe, controller, worker);
+        Assert.False(endpoint.IsConnected);
+    }
+
+    [Fact]
     public void PipePolicyRejectsNonAppContainerIdentity()
     {
         if (!OperatingSystem.IsWindows()) return;
