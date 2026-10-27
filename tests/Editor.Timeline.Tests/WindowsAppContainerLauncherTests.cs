@@ -81,6 +81,20 @@ public sealed class WindowsAppContainerLauncherTests
     }
 
     [Fact]
+    public void ExternalEgressCanaryCannotConnectFromAppContainer()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var worker = Path.Combine(root, "TestResults", "sandbox-worker", "Editor.Security.Worker.exe");
+        Assert.True(File.Exists(worker));
+        int code = WindowsAppContainerLauncher.RunExternalNetworkProbe(worker);
+        // 0: explicit access denied; 73: unavailable / timeout (not a WFP proof).
+        // 72: connected, must fail. Never treat 73 as verified WFP blocking.
+        Assert.True(code is 0 or 73, $"Unexpected external egress result: {code}");
+    }
+
+    [Fact]
     public void LauncherVerifiesKernelAppContainerTokenBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
