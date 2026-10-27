@@ -30,6 +30,34 @@ jobs:
       - name: Publicar worker de diagnostico self-contained
         run: dotnet publish src/Editor.Security.Worker/Editor.Security.Worker.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output TestResults/sandbox-worker
 
+      - name: Conceder somente leitura e execucao do bundle ao AppContainer
+        shell: pwsh
+        run: |
+          $native = @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Security.Principal;
+          public static class PocAppContainerSid {
+            [DllImport("userenv.dll", CharSet=CharSet.Unicode)]
+            static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
+            [DllImport("advapi32.dll")]
+            static extern IntPtr FreeSid(IntPtr sid);
+            public static string Get() {
+              IntPtr sid;
+              int hr = DeriveAppContainerSidFromAppContainerName("MigaMelhore.EditorMultimedia.MediaWorker", out sid);
+              if (hr < 0 || sid == IntPtr.Zero) Marshal.ThrowExceptionForHR(hr);
+              try { return new SecurityIdentifier(sid).Value; }
+              finally { FreeSid(sid); }
+            }
+          }
+          '@
+          Add-Type -TypeDefinition $native
+          $sid = [PocAppContainerSid]::Get()
+          $bundle = Join-Path $PWD "TestResults/sandbox-worker"
+          if (-not (Test-Path (Join-Path $bundle "Editor.Security.Worker.exe"))) { throw "Worker bundle missing." }
+          & icacls $bundle /grant "*$($sid):(OI)(CI)RX" /T
+          if ($LASTEXITCODE -ne 0) { throw "Failed to authorize AppContainer read/execute." }
+
       - name: Executar testes unitarios
         run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
 
