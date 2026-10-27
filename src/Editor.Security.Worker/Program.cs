@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Net.Sockets;
 using Editor.Security;
 
 // Diagnostic-only worker. File probes never return file contents and must be
@@ -21,6 +22,29 @@ if (args.Length == 2 && args[0] == "--probe-denied-file")
     catch (IOException)
     {
         return 73; // Missing/locked files are not proof of access denial.
+    }
+}
+
+if (args.Length == 2 && args[0] == "--probe-denied-network")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess())
+        return 70;
+    if (!int.TryParse(args[1], out int port) || port is < 1 or > 65535)
+        return 71;
+    using var client = new TcpClient();
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await client.ConnectAsync("127.0.0.1", port, timeout.Token);
+        return 72; // Security failure: outbound connection succeeded.
+    }
+    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AccessDenied)
+    {
+        return 0; // Kernel refused network access.
+    }
+    catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+    {
+        return 73; // Timeout/refused: NOT proof of sandbox denial.
     }
 }
 
