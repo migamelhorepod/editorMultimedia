@@ -9,7 +9,6 @@
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
         <MenuItem Header="Ativar outra biblioteca..." Click="ChangeLibrary_Click"/>
         <MenuItem Header="Desativar biblioteca" Click="DeactivateLibrary_Click"/>
-        <MenuItem Header="Diagnóstico: simular processamento (15 s)" Click="SimulateBusyLibrary_Click"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
         <MenuItem Header="Relocalizar mídia selecionada..." Click="RelinkSelectedMedia_Click"/>
         <Separator/>
@@ -71,6 +70,7 @@
             <Button x:Name="InsertMediaButton" Content="Usar no cursor" Click="InsertFromCatalog_Click"
                     ToolTip="Inserir mais uma ocorrência da mídia, sem importar de novo" IsEnabled="False" Padding="9,5" Margin="0,0,0,6"/>
           </WrapPanel>
+          <TextBlock x:Name="ImportStatus" Text="" Foreground="#F6D17C" Margin="0,0,0,6" TextWrapping="Wrap"/>
           <WrapPanel>
             <Button x:Name="LocateMediaButton" Content="Localizar clipe" Click="LocateCatalogClip_Click"
                     IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
