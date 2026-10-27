@@ -34,7 +34,7 @@ public sealed class WindowsWorkerJob : IDisposable
     /// it on failure. This does not itself provide a sandbox.
     /// </summary>
     internal static WindowsWorkerJob AttachProcessHandle(IntPtr processHandle,
-        nuint memoryLimitBytes = 256 * 1024 * 1024)
+        nuint memoryLimitBytes = 256 * 1024 * 1024, uint processLimit = 1)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -42,6 +42,8 @@ public sealed class WindowsWorkerJob : IDisposable
             throw new ArgumentException("Invalid process handle.", nameof(processHandle));
         if (memoryLimitBytes < 32 * 1024 * 1024)
             throw new ArgumentOutOfRangeException(nameof(memoryLimitBytes));
+        if (processLimit is < 1 or > 2)
+            throw new ArgumentOutOfRangeException(nameof(processLimit));
         SafeJobHandle job = CreateJobObjectW(IntPtr.Zero, null);
         if (job.IsInvalid)
         {
@@ -59,7 +61,7 @@ public sealed class WindowsWorkerJob : IDisposable
                     LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
                                  JOB_OBJECT_LIMIT_ACTIVE_PROCESS |
                                  JOB_OBJECT_LIMIT_PROCESS_MEMORY,
-                    ActiveProcessLimit = 1
+                    ActiveProcessLimit = processLimit
                 },
                 ProcessMemoryLimit = memoryLimitBytes
             };
