@@ -154,3 +154,30 @@ jobs:
             TestResults/
             tests/playwright/playwright-report/
             tests/playwright/test-results/
+
+  poc0031-security-evidence:
+    name: Security release gate — POC-003.1
+    needs: build-test
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Recuperar evidencias xUnit e WFP
+        uses: actions/download-artifact@v4
+        with:
+          name: resultados-testes
+          path: TestResults
+      - name: Verificar provas de seguranca antes do merge
+        shell: pwsh
+        run: |
+          ./tests/security/assert-poc0031-release-gate.ps1 -ResultsRoot "TestResults" -AuditPath "TestResults/sec-006-wfp-audit.json"
+      - name: Publicar parecer auditavel
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc0031-gate-report
+          if-no-files-found: warn
+          retention-days: 14
+          path: TestResults/poc0031-gate.json
