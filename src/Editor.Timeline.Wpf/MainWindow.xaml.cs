@@ -317,25 +317,7 @@ public partial class MainWindow : Window
                 {
                     // All actual probing/decoding of new media executes in the
                     // verified AppContainer worker; never in the WPF process.
-                    asset = await Task.Run(() =>
-                    {
-                        if (!MediaReferences.TryDetectKind(stored.Path, out var mediaKind))
-                            throw new MediaReferenceException("Extensão não suportada.");
-                        var file = new FileInfo(stored.Path);
-                        if (!file.Exists || file.Length <= 0)
-                            throw new MediaReferenceException("Arquivo indisponível ou vazio.");
-                        var workerExe = System.IO.Path.Combine(AppContext.BaseDirectory,
-                            "worker", "Editor.Security.Worker.exe");
-                        var processor = new IsolatedMediaProcessingService(
-                            libraryRootPath, importCoordinator.ActiveLibrary, workerExe);
-                        long? duration = null;
-                        if (mediaKind is MediaKind.Video or MediaKind.Audio)
-                            duration = processor.InspectDurationTicks(file.FullName);
-                        else
-                            processor.DecodeToNull(file.FullName);
-                        return new MediaAsset(Guid.NewGuid(), mediaKind,
-                            file.Name, file.FullName, file.Length, duration);
-                    });
+                    asset = await InspectLibraryAssetInSandboxAsync(stored.Path);
                 }
                 catch (Exception ex) when (ex is MediaReferenceException or
                     NotSupportedException or InvalidDataException or ArgumentException)
@@ -393,6 +375,30 @@ public partial class MainWindow : Window
         }
     }
 
+
+    /// <summary>Only the isolated worker opens and decodes the media.</summary>
+    private Task<MediaAsset> InspectLibraryAssetInSandboxAsync(string sourcePath)
+    {
+        string activeRoot = libraryRootPath;
+        Guid activeLibraryId = importCoordinator.ActiveLibrary;
+        return Task.Run(() =>
+        {
+            if (!MediaReferences.TryDetectKind(sourcePath, out var kind))
+                throw new MediaReferenceException("Extensão não suportada.");
+            var file = new FileInfo(sourcePath);
+            if (!file.Exists || file.Length <= 0)
+                throw new MediaReferenceException("Arquivo indisponível ou vazio.");
+            var worker = System.IO.Path.Combine(AppContext.BaseDirectory,
+                "worker", "Editor.Security.Worker.exe");
+            var service = new IsolatedMediaProcessingService(activeRoot, activeLibraryId, worker);
+            long? measured = null;
+            if (kind is MediaKind.Video or MediaKind.Audio)
+                measured = service.InspectDurationTicks(file.FullName);
+            else
+                service.DecodeToNull(file.FullName);
+            return new MediaAsset(Guid.NewGuid(), kind, file.Name, file.FullName, file.Length, measured);
+        });
+    }
 
     private MediaAsset? CatalogSelection() =>
         (MediaList?.SelectedItem as MediaListItem)?.Asset;
