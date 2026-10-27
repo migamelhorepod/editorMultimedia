@@ -1,4 +1,5 @@
 using System.Security.Principal;
+using System.IO.Pipes;
 
 namespace Editor.Security;
 
@@ -23,6 +24,25 @@ public static class RestrictedWorkerPipePolicy
         // Owner = controller; only SYSTEM, controller and exact AppContainer
         // receive pipe access. No Everyone, Users or ALL APPLICATION PACKAGES.
         return $"O:{controllerSid.Value}D:P(A;;GA;;;SY)(A;;GA;;;{controllerSid.Value})(A;;GRGW;;;{workerSid.Value})";
+    }
+
+    /// <summary>
+    /// Creates a real native Windows pipe with a protected DACL. Never use
+    /// CurrentUserOnly: .NET ignores the explicit pipeSecurity in that mode.
+    /// The returned endpoint must still authenticate the connected worker PID.
+    /// </summary>
+    public static NamedPipeServerStream CreateEndpoint(string name,
+        SecurityIdentifier controllerSid, SecurityIdentifier workerSid)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (string.IsNullOrWhiteSpace(name) ||
+            !name.StartsWith(WindowsWorkerPipe.Prefix, StringComparison.Ordinal))
+            throw new ArgumentException("Unexpected pipe namespace.", nameof(name));
+        var security = new PipeSecurity();
+        security.SetSecurityDescriptorSddlForm(BuildDacl(controllerSid, workerSid));
+        return NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+            4096, 4096, security, HandleInheritability.None);
     }
 
     public static void DemandConfiguredPipeEndpoint()
