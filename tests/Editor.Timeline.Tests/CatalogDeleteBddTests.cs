@@ -10,7 +10,7 @@ public sealed class CatalogDeleteBddTests
         var path = Path.Combine(Path.GetTempPath(), "catalog-delete-" + Guid.NewGuid().ToString("N") + ".png");
         // Metadata is intentionally a project reference; deleting catalog entries
         // must not access or remove source files.
-        return new MediaAsset(Guid.NewGuid(), path, Path.GetFileName(path), MediaKind.Image, null);
+        return new MediaAsset(Guid.NewGuid(), MediaKind.Image, Path.GetFileName(path), path, 0);
     }
 
     [Fact]
