@@ -34,6 +34,21 @@ public sealed class RestrictedWorkerPipePolicyTests
     }
 
     [Fact]
+    public async Task RestrictedPipeRejectsUnexpectedClientProcessId()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var registry = new AccessGrantRegistry(Guid.NewGuid());
+        var pipe = new WindowsWorkerPipe(registry);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        var server = pipe.ServeRestrictedOnceAsync(Environment.ProcessId + 1, timeout.Token);
+        using var client = new System.IO.Pipes.NamedPipeClientStream(".",
+            pipe.PipeName, System.IO.Pipes.PipeDirection.InOut,
+            System.IO.Pipes.PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000, timeout.Token);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () => await server);
+    }
+
+    [Fact]
     public void PipePolicyRejectsNonAppContainerIdentity()
     {
         if (!OperatingSystem.IsWindows()) return;
