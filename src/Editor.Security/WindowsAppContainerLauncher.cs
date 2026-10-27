@@ -139,6 +139,24 @@ public static class WindowsAppContainerLauncher
                     isAppContainer != 1)
                     throw new UnauthorizedAccessException(
                         "Process lacks a Windows AppContainer token.");
+                // TokenCapabilities = 22, first DWORD is GroupCount in TOKEN_GROUPS.
+                // Require zero capabilities; merely setting CapabilityCount=0
+                // on the creation request is insufficient evidence.
+                IntPtr capabilityBuffer = Marshal.AllocHGlobal(4096);
+                try
+                {
+                    if (!GetTokenInformationBuffer(token, 22, capabilityBuffer,
+                        4096, out int capabilityBytes) || capabilityBytes < sizeof(int))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(),
+                            "Cannot inspect effective AppContainer capabilities.");
+                    if (Marshal.ReadInt32(capabilityBuffer) != 0)
+                        throw new UnauthorizedAccessException(
+                            "Unexpected capability in sandbox token; outbound network disallowed.");
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(capabilityBuffer);
+                }
             }
             finally
             {
@@ -232,6 +250,9 @@ public static class WindowsAppContainerLauncher
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool GetTokenInformation(IntPtr token, int informationClass,
         out int information, int length, out int returnLength);
+    [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "GetTokenInformation")]
+    private static extern bool GetTokenInformationBuffer(IntPtr token, int informationClass,
+        IntPtr information, int length, out int returnLength);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll", SetLastError = true)]
