@@ -43,8 +43,7 @@ public sealed class WindowsAppContainerLauncherTests
             ?? throw new InvalidOperationException("Missing test configuration.");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
-        var worker = Path.Combine(root, "src", "Editor.Security.Worker",
-            "bin", configuration, "net10.0", "Editor.Security.Worker.exe");
+        var worker = Path.Combine(root, "TestResults", "sandbox-worker", "Editor.Security.Worker.exe");
         Assert.True(File.Exists(worker), $"Worker must be built: {worker}");
         var privateFile = Path.Combine(Path.GetTempPath(),
             "editor-poc003-private-" + Guid.NewGuid().ToString("N") + ".txt");
@@ -68,8 +67,7 @@ public sealed class WindowsAppContainerLauncherTests
             ?? throw new InvalidOperationException("Missing configuration.");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", ".."));
-        var worker = Path.Combine(root, "src", "Editor.Security.Worker",
-            "bin", configuration, "net10.0", "Editor.Security.Worker.exe");
+        var worker = Path.Combine(root, "TestResults", "sandbox-worker", "Editor.Security.Worker.exe");
         Assert.True(File.Exists(worker));
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
