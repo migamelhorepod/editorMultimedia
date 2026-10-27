@@ -69,8 +69,8 @@ jobs:
           $probe = "TestResults/sec-006-probe.txt"
           if (Test-Path $probe) {
             $lines = @(Get-Content $probe)
-            if ($lines.Count -ne 3) { throw "Malformed SEC-006 probe timing fixture." }
-            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json" -WorkerPath $lines[0] -ProbeStartUtc $lines[1] -ProbeEndUtc $lines[2]
+            if ($lines.Count -ne 4) { throw "Malformed SEC-006 probe timing fixture." }
+            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json" -WorkerPath $lines[0] -WorkerProcessId ([int]$lines[1]) -ProbeStartUtc $lines[2] -ProbeEndUtc $lines[3]
           } else {
             ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json"
           }
