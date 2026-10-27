@@ -31,6 +31,12 @@ public sealed class AuthorizedMediaCatalog
         lock (gate) paths.Add(resourceId, path);
     }
 
+    public void Unregister(Guid resourceId)
+    {
+        if (resourceId == Guid.Empty) return;
+        lock (gate) paths.Remove(resourceId);
+    }
+
     public string Resolve(WorkerRequest request)
     {
         if (request.Operation is not (MediaAccessOperation.InspectMetadata or MediaAccessOperation.ReadChunk) ||
