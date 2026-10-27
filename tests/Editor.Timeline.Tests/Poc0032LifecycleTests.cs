@@ -63,6 +63,40 @@ public sealed class Poc0032LifecycleTests
     }
 
     [Fact]
+    public void StorageDisappearanceClosesAffectedJobWithoutUserCancel()
+    {
+        var coordinator = new MediaImportCoordinator(Guid.NewGuid());
+        var jobId = coordinator.BeginImport();
+        bool present = true;
+        var terminated = new List<Guid>();
+        var monitor = new LibraryStorageMonitor(coordinator, Path.GetTempPath(),
+            terminated.Add, _ => present);
+        Assert.True(monitor.Check());
+        present = false;
+        Assert.False(monitor.Check());
+        Assert.Contains(jobId, terminated);
+        Assert.Equal(0, coordinator.ActiveImports);
+        Assert.Throws<IOException>(() => { coordinator.BeginImport(); });
+        present = true;
+        Assert.True(monitor.Check());
+        Assert.NotEqual(Guid.Empty, coordinator.BeginImport());
+    }
+
+    [Fact]
+    public void LibraryModalNeverChangesSelectionWhileImporting()
+    {
+        var library = Guid.NewGuid();
+        var coordinator = new MediaImportCoordinator(library);
+        var task = coordinator.BeginImport();
+        var requested = coordinator.TryChangeLibrary(Guid.NewGuid());
+        Assert.False(requested.Allowed);
+        Assert.Equal("Aguarde o processamento ser finalizado", requested.PopupMessage);
+        Assert.Equal(library, coordinator.ActiveLibrary);
+        coordinator.CompleteImport(task);
+        Assert.True(coordinator.TryChangeLibrary(Guid.NewGuid()).Allowed);
+    }
+
+    [Fact]
     public void StartupRecoveryRejectsCorruptedCompletedOutput()
     {
         string folder = Path.Combine(Path.GetTempPath(), "poc0032-integrity-" + Guid.NewGuid().ToString("N"));
