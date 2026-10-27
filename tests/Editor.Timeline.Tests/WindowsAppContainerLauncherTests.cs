@@ -26,6 +26,14 @@ public sealed class WindowsAppContainerLauncherTests
     }
 
     [Fact]
+    public void FixedDiagnosticActuallyExecutesUnderWindowsAppContainer()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.Equal(0, WindowsAppContainerLauncher.RunRestrictedDiagnostic());
+        Assert.False(MediaWorkerAdmission.IsMediaProcessingAvailable);
+    }
+
+    [Fact]
     public void LauncherVerifiesKernelAppContainerTokenBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
