@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private Guid? catalogSelectionId;
     private readonly MediaImportCoordinator importCoordinator = new(Guid.NewGuid());
     private LibraryStorageMonitor? libraryStorageMonitor;
+    private string libraryRootPath = @"D:\";
     private readonly DispatcherTimer storageTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly Dictionary<Guid, IDisposable> activeWorkerJobs = new();
 
@@ -94,11 +95,20 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        libraryStorageMonitor = CreateStorageMonitor(libraryRootPath);
+        libraryStorageMonitor.Check();
         storageTimer.Tick += (_, _) =>
         {
             if (libraryStorageMonitor is null) return;
             if (!libraryStorageMonitor.Check())
-                foreach (var media in mediaAssets) availableMedia[media.Id] = false;
+            {
+                foreach (var media in mediaAssets)
+                {
+                    if (media.SourcePath.StartsWith(libraryRootPath, StringComparison.OrdinalIgnoreCase))
+                        availableMedia[media.Id] = false;
+                }
+                Draw();
+            }
         };
         storageTimer.Start();
         session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
@@ -577,6 +587,12 @@ public partial class MainWindow : Window
     private void SaveProject_Click(object sender, RoutedEventArgs e) => SaveProject();
     private void SaveAsProject_Click(object sender, RoutedEventArgs e) => SaveProject(choosePath: true);
 
+    private LibraryStorageMonitor CreateStorageMonitor(string root) =>
+        new(importCoordinator, root, id =>
+        {
+            if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
+        });
+
     private void ChangeLibrary_Click(object sender, RoutedEventArgs e)
     {
         if (importCoordinator.ActiveImports > 0)
@@ -586,13 +602,16 @@ public partial class MainWindow : Window
         }
         var picker = new Microsoft.Win32.OpenFolderDialog { Title = "Selecionar biblioteca de mídias" };
         if (picker.ShowDialog(this) != true) return;
+        if (!System.IO.Path.GetFullPath(picker.FolderName).StartsWith(@"D:\", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(this, "Selecione uma pasta de biblioteca dentro do disco D:",
+                "Biblioteca", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         var result = importCoordinator.TryChangeLibrary(Guid.NewGuid());
         if (!result.Allowed) { ShowBusyLibraryModal(); return; }
-        libraryStorageMonitor = new LibraryStorageMonitor(importCoordinator, picker.FolderName,
-            id =>
-            {
-                if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
-            });
+        libraryRootPath = picker.FolderName;
+        libraryStorageMonitor = CreateStorageMonitor(libraryRootPath);
         libraryStorageMonitor.Check();
     }
 
