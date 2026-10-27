@@ -29,7 +29,7 @@ public sealed class MediaImportCoordinator
     {
         lock (gate)
         {
-            if (unavailable) throw new IOException("Storage is unavailable.");
+            if (unavailable || library == Guid.Empty) throw new IOException("No active and available library.");
             var id = Guid.NewGuid();
             active.Add(id);
             return id;
