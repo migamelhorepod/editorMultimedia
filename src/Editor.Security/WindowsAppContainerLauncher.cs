@@ -102,6 +102,8 @@ public static class WindowsAppContainerLauncher
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.InspectMetadata)
+            throw new UnauthorizedAccessException("Metadata processing requires InspectMetadata grant.");
         string authorizedPath = catalog.Resolve(request);
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
