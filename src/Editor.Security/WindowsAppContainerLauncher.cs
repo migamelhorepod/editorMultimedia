@@ -140,13 +140,13 @@ public static class WindowsAppContainerLauncher
                     isAppContainer != 1)
                     throw new UnauthorizedAccessException(
                         "Process lacks a Windows AppContainer token.");
-                // TokenCapabilities = 22, first DWORD is GroupCount in TOKEN_GROUPS.
+                // TokenCapabilities = 30, first DWORD is GroupCount in TOKEN_GROUPS.
                 // Require zero capabilities; merely setting CapabilityCount=0
                 // on the creation request is insufficient evidence.
                 IntPtr capabilityBuffer = Marshal.AllocHGlobal(4096);
                 try
                 {
-                    if (!GetTokenInformationBuffer(token, 22, capabilityBuffer,
+                    if (!GetTokenInformationBuffer(token, 30, capabilityBuffer,
                         4096, out int capabilityBytes) || capabilityBytes < sizeof(int))
                         throw new Win32Exception(Marshal.GetLastWin32Error(),
                             "Cannot inspect effective AppContainer capabilities.");
