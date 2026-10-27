@@ -65,7 +65,18 @@ public static class WindowsAppContainerLauncher
         return LaunchDiagnostic(workerExecutable, "--probe-external-network", true);
     }
 
-    private static int LaunchDiagnostic(string executable, string arguments, bool run)
+    public static int RunRestrictedIpcProbe(string workerExecutable, WindowsWorkerPipe pipe)
+    {
+        ArgumentNullException.ThrowIfNull(pipe);
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Unexpected IPC diagnostic worker.");
+        return LaunchDiagnostic(workerExecutable, "--restricted-pipe " + pipe.PipeName, true,
+            pid => pipe.ServeRestrictedOnceAsync(pid,
+                new CancellationTokenSource(TimeSpan.FromSeconds(6)).Token));
+    }
+
+    private static int LaunchDiagnostic(string executable, string arguments, bool run,
+        Func<int, Task<WorkerResponse>>? authenticatedServer = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -87,7 +98,11 @@ public static class WindowsAppContainerLauncher
         var isExternalProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments == "--probe-external-network" && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe)
+        var isIpcProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--restricted-pipe editor-poc003-", StringComparison.Ordinal) &&
+            authenticatedServer is not null && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -187,6 +202,7 @@ public static class WindowsAppContainerLauncher
                 CloseHandle(token);
             }
             if (!run) return checked((int)process.dwProcessId);
+            Task<WorkerResponse>? serverTask = authenticatedServer?.Invoke(checked((int)process.dwProcessId));
             if (ResumeThread(process.hThread) == uint.MaxValue)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume restricted process.");
             uint wait = WaitForSingleObject(process.hProcess, 5000);
@@ -194,6 +210,11 @@ public static class WindowsAppContainerLauncher
                 throw new InvalidOperationException("Restricted diagnostic failed to exit in time.");
             if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (serverTask is not null)
+            {
+                var response = serverTask.GetAwaiter().GetResult();
+                if (response.Accepted) throw new UnauthorizedAccessException("IPC unlocked media processing.");
+            }
             return ConvertNativeExitCode(exitCode);
         }
         finally
