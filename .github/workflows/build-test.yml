@@ -27,23 +27,18 @@ jobs:
       - name: Compilar todos os projetos (inclui WPF)
         run: dotnet build EditorMultimidia.sln --configuration Release --no-restore
 
-      - name: Executar testes unitarios
-        run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
-
-      # Default success() condition: integration never runs after a failed unit step.
-      - name: Preparar Node.js 24 LTS
-        uses: actions/setup-node@v5
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: tests/playwright/package-lock.json
-
       - name: Preparar FFmpeg e ffprobe reais
         shell: pwsh
         run: |
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg --yes --no-progress --limit-output
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $installed = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              choco install ffmpeg --yes --no-progress --limit-output
+              if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+              Write-Warning "FFmpeg repository unavailable (attempt $attempt of 3)."
+              if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt) }
+            }
+            if (-not $installed) { throw 'FFmpeg installation failed after three attempts.' }
             $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
             $env:Path -split ';' | Where-Object { $_ } | Add-Content $env:GITHUB_PATH
           }
@@ -51,6 +46,90 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ffprobe -version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publicar worker de diagnostico self-contained
+        run: dotnet publish src/Editor.Security.Worker/Editor.Security.Worker.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output TestResults/sandbox-worker
+
+      - name: Copiar ferramentas de decodificacao ao bundle isolado
+        shell: pwsh
+        run: |
+          $tools = "C:/ProgramData/chocolatey/lib/ffmpeg/tools"
+          $candidate = @(Get-ChildItem $tools -Filter ffprobe.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { Test-Path (Join-Path $_.DirectoryName "ffmpeg.exe") } |
+              Select-Object -First 1)
+          if (-not $candidate) { throw "Real FFmpeg/ffprobe binary pair not found." }
+          $source = $candidate[0].DirectoryName
+          Copy-Item (Join-Path $source "ffprobe.exe") "TestResults/sandbox-worker/ffprobe.exe"
+          Copy-Item (Join-Path $source "ffmpeg.exe") "TestResults/sandbox-worker/ffmpeg.exe"
+
+      - name: Conceder somente leitura e execucao do bundle ao AppContainer
+        shell: pwsh
+        run: |
+          $native = @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Security.Principal;
+          public static class PocAppContainerSid {
+            [DllImport("userenv.dll", CharSet=CharSet.Unicode)]
+            static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
+            [DllImport("advapi32.dll")]
+            static extern IntPtr FreeSid(IntPtr sid);
+            public static string Get() {
+              return GetForeign("MigaMelhore.EditorMultimedia.MediaWorker");
+            }
+            public static string GetForeign(string name) {
+              IntPtr sid;
+              int hr = DeriveAppContainerSidFromAppContainerName(name, out sid);
+              if (hr < 0 || sid == IntPtr.Zero) Marshal.ThrowExceptionForHR(hr);
+              try { return new SecurityIdentifier(sid).Value; }
+              finally { FreeSid(sid); }
+            }
+          }
+          '@
+          Add-Type -TypeDefinition $native
+          $sid = [PocAppContainerSid]::Get()
+          $bundle = Join-Path $PWD "TestResults/sandbox-worker"
+          if (-not (Test-Path (Join-Path $bundle "Editor.Security.Worker.exe"))) { throw "Worker bundle missing." }
+          & icacls $bundle /grant "*$($sid):(OI)(CI)RX" /T
+          if ($LASTEXITCODE -ne 0) { throw "Failed to authorize AppContainer read/execute." }
+          # Foreign AppContainer gets only execute rights on diagnostic worker,
+          # never the protected IPC endpoint or media files.
+          $foreignName = "MigaMelhore.EditorMultimedia.MediaWorker.ForeignSecurityTest"
+          $foreignSid = [PocAppContainerSid]::GetForeign($foreignName)
+          & icacls $bundle /grant "*$($foreignSid):(OI)(CI)RX" /T
+          if ($LASTEXITCODE -ne 0) { throw "Failed to prepare foreign sandbox test profile." }
+
+      - name: Habilitar auditoria WFP apenas no runner efemero
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true') { throw 'WFP audit policy may only be changed on a disposable GitHub runner.' }
+          auditpol.exe /set /subcategory:"Filtering Platform Connection" /failure:enable
+          if ($LASTEXITCODE -ne 0) { throw "Windows WFP auditing could not be enabled." }
+          auditpol.exe /get /subcategory:"Filtering Platform Connection"
+
+      - name: Executar testes unitarios
+        run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
+
+      # Default success() condition: integration never runs after a failed unit step.
+      - name: Coletar evidencias WFP SEC-006 (somente leitura)
+        if: always()
+        shell: pwsh
+        run: |
+          $probe = "TestResults/sec-006-probe.txt"
+          if (Test-Path $probe) {
+            $lines = @(Get-Content $probe)
+            if ($lines.Count -ne 4) { throw "Malformed SEC-006 probe timing fixture." }
+            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json" -WorkerPath $lines[0] -WorkerProcessId ([int]$lines[1]) -ProbeStartUtc $lines[2] -ProbeEndUtc $lines[3]
+          } else {
+            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json"
+          }
+
+      - name: Preparar Node.js 24 LTS
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/playwright/package-lock.json
 
       - name: Instalar dependencias TypeScript fixadas
         working-directory: tests/playwright
@@ -75,3 +154,30 @@ jobs:
             TestResults/
             tests/playwright/playwright-report/
             tests/playwright/test-results/
+
+  poc0031-security-evidence:
+    name: Security release gate — POC-003.1
+    needs: build-test
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Recuperar evidencias xUnit e WFP
+        uses: actions/download-artifact@v4
+        with:
+          name: resultados-testes
+          path: .
+      - name: Verificar provas de seguranca antes do merge
+        shell: pwsh
+        run: |
+          ./tests/security/assert-poc0031-release-gate.ps1 -ResultsRoot "TestResults" -AuditPath "TestResults/sec-006-wfp-audit.json"
+      - name: Publicar parecer auditavel
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc0031-gate-report
+          if-no-files-found: warn
+          retention-days: 14
+          path: TestResults/poc0031-gate.json
