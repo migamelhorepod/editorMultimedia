@@ -51,6 +51,17 @@ foreach (var command in commands)
                 simulatedStoragePresent = true;
                 value = new { available = monitor.Check(), active = importLifecycle.ActiveImports };
                 break;
+            case "importPhysical":
+                var physicalCopy = await new LibraryFileStore(Text("library")).ImportAsync(Text("path"));
+                var registeredAsset = MediaReferences.InspectFile(physicalCopy.Path);
+                var inCatalog = session.Media.FirstOrDefault(m =>
+                    MediaReferences.SameSource(m.SourcePath, registeredAsset.SourcePath));
+                if (inCatalog is not null) { value = "duplicate"; break; }
+                var registeredClip = MediaReferences.PlanClip(session.Current, registeredAsset, Time(), Id());
+                session.Execute(s => TimelineEngine.Insert(s, s.Version, registeredClip),
+                    session.Media.Append(registeredAsset).ToArray());
+                value = physicalCopy.Path;
+                break;
             case "import":
                 var asset = MediaReferences.InspectFile(Text("path"));
                 var existing = session.Media.FirstOrDefault(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath));
