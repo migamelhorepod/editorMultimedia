@@ -30,6 +30,7 @@ $checks = [ordered]@{
     "FFprobe-under-AppContainer-allowed-media" = (HasProof "RealCodecCanReadOnlyExplicitSyntheticWavInAppContainer" 2)
     "OS-denial-private-and-path-escapes" = ((HasProof "RealWorkerCannotReadPrivateFileInsideWindowsAppContainer") -and
         (HasProof "SymbolicLinkCannotEscapeToPrivateUnsharedFile") -and
+        (HasProof "DirectoryReparsePointCannotEscapeToOtherLibrary") -and
         (HasProof "ParentEscapeAndLinkToAnotherLibraryCannotBeRegistered") -and
         (HasProof "ValidGrantOnlyMapsItsOwnActiveLibraryMedia"))
 }
