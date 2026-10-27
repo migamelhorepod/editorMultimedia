@@ -142,6 +142,10 @@ public static class WindowsAppContainerLauncher
             throw new UnauthorizedAccessException("Invalid isolated worker executable.");
 
         using var staged = new WindowsScopedCodecInput(source);
+        // The staging copy may be slow on a conventional HDD. Never launch
+        // after the task grant has expired or been revoked during that copy.
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
         var pipe = new WindowsWorkerMetadataPipe();
         long ticks = 0;
         string args = "--process-metadata-report \"" + staged.Path + "\" " +
@@ -172,6 +176,8 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
         using var staged = new WindowsScopedCodecInput(source);
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
         return LaunchDiagnostic(workerExecutable,
             "--process-decode \"" + staged.Path + "\"", true);
     }
