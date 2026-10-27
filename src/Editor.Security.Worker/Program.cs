@@ -34,8 +34,8 @@ if (args.Length == 2 && args[0] == "--probe-denied-network")
     using var client = new TcpClient();
     try
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        await client.ConnectAsync("127.0.0.1", port, timeout.Token);
+        using var networkTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await client.ConnectAsync("127.0.0.1", port, networkTimeout.Token);
         return 72; // Security failure: outbound connection succeeded.
     }
     catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AccessDenied)
