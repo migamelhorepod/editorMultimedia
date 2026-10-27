@@ -324,7 +324,7 @@ public partial class MainWindow : Window
                         var file = new FileInfo(stored.Path);
                         if (!file.Exists || file.Length <= 0)
                             throw new MediaReferenceException("Arquivo indisponível ou vazio.");
-                        var workerExe = Path.Combine(AppContext.BaseDirectory,
+                        var workerExe = System.IO.Path.Combine(AppContext.BaseDirectory,
                             "worker", "Editor.Security.Worker.exe");
                         var processor = new IsolatedMediaProcessingService(
                             libraryRootPath, importCoordinator.ActiveLibrary, workerExe);
