@@ -7,4 +7,7 @@
     <!-- Required by generated Windows P/Invoke stubs; app code does not access raw memory. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
+  </ItemGroup>
 </Project>
