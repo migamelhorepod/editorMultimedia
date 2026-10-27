@@ -86,13 +86,11 @@
                   ToolTip="Restaura a duração original da mídia, preservando os demais cortes na timeline"
                   IsEnabled="False" Padding="8,5" Margin="0,0,0,6"
                   HorizontalAlignment="Left"/>
-          <Button x:Name="RemoveMediaButton" Content="Remover do catálogo" Click="RemoveUnusedMedia_Click"
-                  ToolTipService.ShowOnDisabled="True"
-                  ToolTip="Exclui somente a referência do catálogo, não apaga clipes na timeline, nem o arquivo original"
-                  IsEnabled="False" Padding="8,5" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+
           <TextBlock x:Name="MediaSummary" Text="0 mídias" Foreground="#B5C0D2" Margin="0,6,0,0" FontSize="11"/>
         </StackPanel>
         <ListBox x:Name="MediaList" SelectionChanged="MediaSelection_Changed"
+                 PreviewMouseRightButtonDown="MediaList_RightClick"
                  MouseDoubleClick="MediaList_MouseDoubleClick"
                  Background="#1C2230" BorderBrush="#3A4657"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
