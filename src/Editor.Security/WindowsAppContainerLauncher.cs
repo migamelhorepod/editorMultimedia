@@ -87,6 +87,15 @@ public static class WindowsAppContainerLauncher
         return (exitCode, pid);
     }
 
+    public static int RunAuthorizedCodecIsolationProbe(
+        string workerExecutable, AuthorizedMediaCatalog catalog,
+        WorkerRequest request, bool useFfmpeg)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        string authorizedPath = catalog.Resolve(request);
+        return RunCodecIsolationProbe(workerExecutable, authorizedPath, useFfmpeg);
+    }
+
     public static int RunCodecIsolationProbe(string workerExecutable, string syntheticInput, bool useFfmpeg)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
