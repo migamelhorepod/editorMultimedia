@@ -153,7 +153,7 @@ public static class WindowsAppContainerLauncher
         int exit = LaunchDiagnostic(workerExecutable, args, true,
             async pid =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
                 ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
                 return new WorkerResponse(WorkerRequest.CurrentVersion,
                     request.RequestId, AccessDecision.Allowed);
