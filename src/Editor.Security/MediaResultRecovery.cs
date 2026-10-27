@@ -99,9 +99,12 @@ public sealed class MediaResultRecovery
         if (id == Guid.Empty) throw new ArgumentException("Task identity required.");
     }
 
-    private static bool TryTaskFile(string name, string suffix, out Guid id) =>
-        name.EndsWith(suffix, StringComparison.Ordinal) &&
-        Guid.TryParseExact(name.AsSpan(0, name.Length - suffix.Length), "N", out id);
+    private static bool TryTaskFile(string name, string suffix, out Guid id)
+    {
+        id = Guid.Empty;
+        return name.EndsWith(suffix, StringComparison.Ordinal) &&
+            Guid.TryParseExact(name.AsSpan(0, name.Length - suffix.Length), "N", out id);
+    }
 
     private static bool IsLink(string path) =>
         (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
