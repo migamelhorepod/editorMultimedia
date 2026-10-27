@@ -11,8 +11,13 @@ $project = Join-Path $repo "src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj"
 if ($LASTEXITCODE -ne 0) { throw "Não foi possível compilar o editor e o worker." }
 
 $bundle = Join-Path $repo "src\Editor.Timeline.Wpf\bin\$Configuration\net10.0-windows\worker"
+$workerProject = Join-Path $repo "src\Editor.Security.Worker\Editor.Security.Worker.csproj"
+# AppContainer cannot assume access to the global .NET installation. Publish the
+# isolated worker WITH its own stable .NET 10 runtime, like the CI security proof.
+& dotnet publish $workerProject --configuration $Configuration --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output $bundle
+if ($LASTEXITCODE -ne 0) { throw "Falha na publicação self-contained do worker." }
 $worker = Join-Path $bundle "Editor.Security.Worker.exe"
-if (-not (Test-Path $worker)) { throw "O build não publicou o executável AppContainer." }
+if (-not (Test-Path $worker)) { throw "O publish não produziu o executável AppContainer." }
 
 $ffmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
 $ffprobe = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
