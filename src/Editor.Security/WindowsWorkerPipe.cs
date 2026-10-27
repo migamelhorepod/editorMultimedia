@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
 namespace Editor.Security;
@@ -49,6 +50,23 @@ public sealed partial class WindowsWorkerPipe
         var response = new WorkerResponse(WorkerRequest.CurrentVersion, request.RequestId, decision);
         await WorkerWireProtocol.WriteAsync(server, response, cancellationToken)
             .ConfigureAwait(false);
+        return response;
+    }
+
+    public async Task<WorkerResponse> ServeRestrictedOnceAsync(int expectedPid, CancellationToken token = default)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        var controller = WindowsIdentity.GetCurrent().User!;
+        var appContainer = new SecurityIdentifier(WindowsAppContainerPreflight.DerivePackageSid());
+        using var server = RestrictedWorkerPipePolicy.CreateEndpoint(PipeName, controller, appContainer);
+        await server.WaitForConnectionAsync(token);
+        if (!GetNamedPipeClientProcessId(server.SafePipeHandle, out uint pid) ||
+            pid != (uint)expectedPid)
+            throw new UnauthorizedAccessException("Untrusted IPC process identity.");
+        var request = await WorkerWireProtocol.ReadAsync<WorkerRequest>(server, token);
+        var response = new WorkerResponse(WorkerRequest.CurrentVersion, request.RequestId,
+            MediaWorkerAdmission.AuthorizeMediaRequest(registry, request));
+        await WorkerWireProtocol.WriteAsync(server, response, token);
         return response;
     }
 
