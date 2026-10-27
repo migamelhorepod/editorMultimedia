@@ -85,6 +85,20 @@ public sealed class Poc0032LifecycleTests
     }
 
     [Fact]
+    public void UnavailableLibraryCanBeReplacedOnlyAfterActiveOperationsEnd()
+    {
+        var manager = new MediaImportCoordinator(Guid.NewGuid());
+        var taskId = manager.BeginImport();
+        manager.MarkStorageUnavailable();
+        Assert.False(manager.TryChangeLibrary(Guid.NewGuid()).Allowed);
+        manager.CompleteImport(taskId);
+        var replacement = Guid.NewGuid();
+        Assert.True(manager.TryChangeLibrary(replacement).Allowed);
+        Assert.Equal(replacement, manager.ActiveLibrary);
+        Assert.NotEqual(Guid.Empty, manager.BeginImport());
+    }
+
+    [Fact]
     public void LibraryModalNeverChangesSelectionWhileImporting()
     {
         var library = Guid.NewGuid();
