@@ -1,32 +1,57 @@
 param(
-    [string] $OutputPath = "TestResults/sec-006-wfp-audit.json"
+    [string] $OutputPath = "TestResults/sec-006-wfp-audit.json",
+    [string] $WorkerPath = "",
+    [string] $DestinationAddress = "1.1.1.1",
+    [int] $DestinationPort = 443,
+    [string] $ProbeStartUtc = "",
+    [string] $ProbeEndUtc = ""
 )
 $ErrorActionPreference = "Stop"
-# Read-only collection. Do not modify machine-wide audit policy or firewall.
+# Read-only: requires prior WFP audit configuration; never enable auditpol in CI.
 $policy = (& auditpol.exe /get /subcategory:"Filtering Platform Connection" 2>&1 | Out-String)
 $policyExit = $LASTEXITCODE
 $events = @()
-$eventError = $null
+$errorText = $null
+$matches = @()
+$start = if ($ProbeStartUtc) { ([datetime]::Parse($ProbeStartUtc)).ToUniversalTime().AddSeconds(-3) } else { (Get-Date).ToUniversalTime().AddMinutes(-15) }
+$end = if ($ProbeEndUtc) { ([datetime]::Parse($ProbeEndUtc)).ToUniversalTime().AddSeconds(3) } else { (Get-Date).ToUniversalTime() }
 try {
-    $start = (Get-Date).AddMinutes(-15)
-    $events = @(Get-WinEvent -FilterHashtable @{LogName="Security"; Id=5157,5156; StartTime=$start} -ErrorAction Stop |
-        Select-Object -First 100 TimeCreated, Id, ProviderName, Message)
+    $events = @(Get-WinEvent -FilterHashtable @{LogName="Security"; Id=5157,5156; StartTime=$start; EndTime=$end} -ErrorAction Stop)
+    foreach ($event in $events) {
+        [xml]$xml = $event.ToXml()
+        $fields = @{}
+        foreach ($field in $xml.Event.EventData.Data) { $fields[[string]$field.Name] = [string]$field.'#text' }
+        $pathValue = $fields['Application']
+        if (-not $pathValue) { $pathValue = $fields['ProcessName'] }
+        $destination = $fields['DestAddress']
+        $port = $fields['DestPort']
+        if (-not $destination) { $destination = $fields['DestinationAddress'] }
+        if (-not $port) { $port = $fields['DestinationPort'] }
+        $workerMatches = $WorkerPath -and $pathValue -and ([string]::Equals($pathValue, $WorkerPath, [StringComparison]::OrdinalIgnoreCase))
+        if ($event.Id -eq 5157 -and $workerMatches -and $destination -eq $DestinationAddress -and $port -eq "$DestinationPort") {
+            $matches += [ordered]@{eventId=$event.Id;timeUtc=$event.TimeCreated.ToUniversalTime().ToString('o');application=$pathValue;destination=$destination;port=$port;processId=$fields['ProcessID'];filterRunTimeId=$fields['FilterRTID']}
+        }
+    }
 } catch {
-    $eventError = $_.Exception.Message
+    $errorText = $_.Exception.Message
 }
 $report = [ordered]@{
-    schema = "sec-006-wfp-audit-v1"
+    schema = "sec-006-wfp-audit-v2"
     collectedUtc = (Get-Date).ToUniversalTime().ToString("o")
     auditpolExitCode = $policyExit
     auditpolText = $policy
+    probeStartUtc = $ProbeStartUtc
+    probeEndUtc = $ProbeEndUtc
+    destinationAddress = $DestinationAddress
+    destinationPort = $DestinationPort
+    workerPath = $WorkerPath
     eventCount = @($events).Count
-    eventReadError = $eventError
-    events = $events
-    # A 5157 event unrelated to the worker is NOT evidence of its isolation.
-    policyProvenForWorker = $false
-    reason = "Requires correlated 5157 denied-connection event (process, destination, time and filter)."
+    eventReadError = $errorText
+    correlatedDeniedEvents = @($matches)
+    policyProvenForWorker = (@($matches).Count -gt 0)
+    reason = if (@($matches).Count -gt 0) {"Correlated WFP 5157 denial for worker, destination and time window."} else {"No correlated WFP 5157 denial; timeout is inconclusive."}
 }
 $directory = Split-Path -Parent $OutputPath
 if ($directory) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
-$report | ConvertTo-Json -Depth 5 | Set-Content -Path $OutputPath -Encoding UTF8
-Write-Host "WFP audit collected; verification remains inconclusive absent correlated 5157."
+$report | ConvertTo-Json -Depth 7 | Set-Content -Path $OutputPath -Encoding UTF8
+Write-Host $report.reason
