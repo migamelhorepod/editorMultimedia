@@ -70,6 +70,23 @@ public sealed partial class WindowsWorkerPipe
         return response;
     }
 
+    public static async Task<WorkerResponse> ConnectRestrictedOnceAsync(
+        string name, WorkerRequest request, CancellationToken token = default)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!IsOurPipeName(name)) throw new ArgumentException("Invalid pipe name.", nameof(name));
+        using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000, token).ConfigureAwait(false);
+        await WorkerWireProtocol.WriteAsync(client, request, token).ConfigureAwait(false);
+        var response = await WorkerWireProtocol.ReadAsync<WorkerResponse>(
+            client, token).ConfigureAwait(false);
+        if (response.ProtocolVersion != WorkerRequest.CurrentVersion ||
+            response.RequestId != request.RequestId)
+            throw new InvalidDataException("Unexpected IPC response identity.");
+        return response;
+    }
+
     public static async Task<WorkerResponse> ConnectOnceAsync(
         string pipeName, WorkerRequest request, CancellationToken cancellationToken = default)
     {
