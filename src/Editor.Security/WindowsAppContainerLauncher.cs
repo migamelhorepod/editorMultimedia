@@ -87,6 +87,19 @@ public static class WindowsAppContainerLauncher
         return (exitCode, pid);
     }
 
+    public static int RunCodecIsolationProbe(string workerExecutable, string syntheticInput, bool useFfmpeg)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Unexpected codec diagnostic worker.");
+        if (!Path.IsPathFullyQualified(syntheticInput) || !File.Exists(syntheticInput) ||
+            syntheticInput.IndexOf((char)34) >= 0 || syntheticInput.IndexOf((char)10) >= 0)
+            throw new ArgumentException("Absolute existing synthetic file required.", nameof(syntheticInput));
+        string command = (useFfmpeg ? "--probe-ffmpeg " : "--probe-ffprobe ") +
+            ((char)34) + syntheticInput + ((char)34);
+        return LaunchDiagnostic(workerExecutable, command, true);
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
         Action<int>? processVerified = null)
@@ -115,7 +128,12 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--restricted-pipe editor-poc003-", StringComparison.Ordinal) &&
             authenticatedServer is not null && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe)
+        var isCodecProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            (arguments.StartsWith("--probe-ffprobe " + ((char)34), StringComparison.Ordinal) ||
+             arguments.StartsWith("--probe-ffmpeg " + ((char)34), StringComparison.Ordinal)) &&
+            arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -167,7 +185,8 @@ public static class WindowsAppContainerLauncher
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     "Windows refused the AppContainer diagnostic process.");
             // Assign hard resource limits before any code could run.
-            resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess);
+            resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess,
+                256 * 1024 * 1024, isCodecProbe ? 2u : 1u);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
