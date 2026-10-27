@@ -71,6 +71,14 @@ public sealed class AppContainerRealMetadataTests
             Assert.Equal(0, WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(
                 worker, catalog, decodingRequest));
             Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
+            var service = new IsolatedMediaProcessingService(folder, library, worker);
+            long serviceTicks = service.InspectDurationTicks(wav);
+            Assert.InRange(serviceTicks,
+                TimeSpan.FromSeconds(1.19).Ticks, TimeSpan.FromSeconds(1.21).Ticks);
+            service.DecodeToNull(wav);
+            service.RevokeAll();
+            Assert.ThrowsAny<Exception>(() => service.InspectDurationTicks(wav));
+            Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
             registry.RevokeTask(task);
             Assert.Throws<UnauthorizedAccessException>(() =>
                 WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(worker, catalog, decodingRequest));
