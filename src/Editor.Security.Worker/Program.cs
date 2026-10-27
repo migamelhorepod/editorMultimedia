@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
+using System.Diagnostics;
 using Editor.Security;
 
 // Diagnostic-only worker. File probes never return file contents and must be
@@ -84,6 +85,56 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
         UnauthorizedAccessException or OperationCanceledException or TimeoutException)
     {
         return 73;
+    }
+}
+
+// Test-only codec subprocess: the launcher verifies AppContainer identity and
+// applies a two-member Job before any worker code executes. Only a synthetic
+// fixture with a dedicated Windows ACL is permitted by the test harness.
+if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg"))
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    if (!Path.IsPathFullyQualified(args[1])) return 71;
+    string tool = args[0] == "--probe-ffmpeg" ? "ffmpeg.exe" : "ffprobe.exe";
+    string executable = Path.Combine(AppContext.BaseDirectory, tool);
+    if (!File.Exists(executable)) return 75;
+    var start = new ProcessStartInfo(executable)
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+    start.ArgumentList.Add("-nostdin");
+    start.ArgumentList.Add("-v");
+    start.ArgumentList.Add("error");
+    start.ArgumentList.Add("-i");
+    start.ArgumentList.Add(args[1]);
+    if (tool == "ffprobe.exe")
+    {
+        start.ArgumentList.Add("-show_entries");
+        start.ArgumentList.Add("format=duration");
+        start.ArgumentList.Add("-of");
+        start.ArgumentList.Add("default=noprint_wrappers=1");
+    }
+    else
+    {
+        start.ArgumentList.Add("-f");
+        start.ArgumentList.Add("null");
+        start.ArgumentList.Add("-");
+    }
+    try
+    {
+        using var process = Process.Start(start);
+        if (process is null) return 76;
+        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        await process.WaitForExitAsync(cancel.Token);
+        return process.ExitCode == 0 ? 0 : 77;
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or
+        System.ComponentModel.Win32Exception or OperationCanceledException)
+    {
+        return 78;
     }
 }
 
