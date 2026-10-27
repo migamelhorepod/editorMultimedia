@@ -15,6 +15,17 @@ public sealed class WindowsAppContainerLauncherTests
     }
 
     [Fact]
+    public void DiagnosticLauncherRejectsArbitraryShellArguments()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var executable = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            WindowsAppContainerLauncher.StartSuspended(executable, "/c whoami"));
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            WindowsAppContainerLauncher.StartSuspended(executable, "/c exit 0 & whoami"));
+    }
+
+    [Fact]
     public void LauncherVerifiesKernelAppContainerTokenBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
