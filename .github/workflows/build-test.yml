@@ -27,6 +27,9 @@ jobs:
       - name: Compilar todos os projetos (inclui WPF)
         run: dotnet build EditorMultimidia.sln --configuration Release --no-restore
 
+      - name: Publicar worker de diagnostico self-contained
+        run: dotnet publish src/Editor.Security.Worker/Editor.Security.Worker.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output TestResults/sandbox-worker
+
       - name: Executar testes unitarios
         run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
 
