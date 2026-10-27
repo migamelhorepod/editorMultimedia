@@ -88,7 +88,11 @@ public sealed class WindowsAppContainerLauncherTests
             "..", "..", "..", "..", ".."));
         var worker = Path.Combine(root, "TestResults", "sandbox-worker", "Editor.Security.Worker.exe");
         Assert.True(File.Exists(worker));
+        var start = DateTime.UtcNow;
         int code = WindowsAppContainerLauncher.RunExternalNetworkProbe(worker);
+        var end = DateTime.UtcNow;
+        var reportPath = Path.Combine(root, "TestResults", "sec-006-probe.txt");
+        File.WriteAllLines(reportPath, [worker, start.ToString("o"), end.ToString("o")]);
         // 0: explicit access denied; 73: unavailable / timeout (not a WFP proof).
         // 72: connected, must fail. Never treat 73 as verified WFP blocking.
         Assert.True(code is 0 or 73, $"Unexpected external egress result: {code}");
