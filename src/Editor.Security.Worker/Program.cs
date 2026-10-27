@@ -48,6 +48,28 @@ if (args.Length == 2 && args[0] == "--probe-denied-network")
     }
 }
 
+// Fixed external IPv4 canary: no DNS, no user URL, no payload transfer.
+// 0 is an explicit socket access denial; 73 means inconclusive timeout/refused.
+if (args.Length == 1 && args[0] == "--probe-external-network")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    using var socket = new TcpClient();
+    try
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await socket.ConnectAsync("1.1.1.1", 443, deadline.Token);
+        return 72; // Unacceptable: external egress succeeded.
+    }
+    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AccessDenied)
+    {
+        return 0;
+    }
+    catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+    {
+        return 73; // Not proof of WFP policy.
+    }
+}
+
 // Existing diagnostic IPC; media stays blocked.
 if (args.Length != 2 || args[0] != "--pipe")
 {
