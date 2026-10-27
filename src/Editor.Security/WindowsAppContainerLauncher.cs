@@ -96,7 +96,7 @@ public static class WindowsAppContainerLauncher
         return RunCodecIsolationProbe(workerExecutable, authorizedPath, useFfmpeg);
     }
 
-    public static int RunCodecIsolationProbe(string workerExecutable, string syntheticInput, bool useFfmpeg)
+    private static int RunCodecIsolationProbe(string workerExecutable, string syntheticInput, bool useFfmpeg)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
