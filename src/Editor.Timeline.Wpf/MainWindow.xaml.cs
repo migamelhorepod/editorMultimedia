@@ -11,6 +11,7 @@ using System.Windows.Shapes;
 using Editor.Timeline;
 using Editor.Security;
 using System.Windows.Threading;
+using System.Threading.Tasks;
 
 namespace Editor.Timeline.Wpf;
 
@@ -270,7 +271,7 @@ public partial class MainWindow : Window
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
-    private void ImportMedia_Click(object sender, RoutedEventArgs e)
+    private async void ImportMedia_Click(object sender, RoutedEventArgs e)
     {
         var picker = new Microsoft.Win32.OpenFileDialog
         {
@@ -290,7 +291,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                var asset = MediaReferences.InspectFile(path);
+                var asset = await Task.Run(() => MediaReferences.InspectFile(path));
                 if (mediaAssets.Any(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath)))
                 {
                     ignored++;
