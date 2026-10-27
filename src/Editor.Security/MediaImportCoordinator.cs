@@ -14,6 +14,8 @@ public sealed class MediaImportCoordinator
     private readonly object gate = new();
     private readonly HashSet<Guid> active = [];
     private bool unavailable;
+    private bool physicalPresent = true;
+    private readonly HashSet<Guid> drainingAfterFailure = [];
     private Guid library;
 
     public MediaImportCoordinator(Guid initialLibrary)
@@ -40,8 +42,10 @@ public sealed class MediaImportCoordinator
     {
         lock (gate)
         {
-            if (!active.Remove(taskId) && !unavailable)
+            if (!active.Remove(taskId))
                 throw new InvalidOperationException("Import task is not active.");
+            drainingAfterFailure.Remove(taskId);
+            if (physicalPresent && drainingAfterFailure.Count == 0) unavailable = false;
         }
     }
 
@@ -62,15 +66,19 @@ public sealed class MediaImportCoordinator
         lock (gate)
         {
             unavailable = true;
-            var affected = active.ToArray();
-            active.Clear();
+            physicalPresent = false;
+            var affected = active.Where(id => drainingAfterFailure.Add(id)).ToArray();
             return affected;
         }
     }
 
     public void MarkStorageAvailable()
     {
-        lock (gate) unavailable = false;
+        lock (gate)
+        {
+            physicalPresent = true;
+            unavailable = drainingAfterFailure.Count != 0;
+        }
     }
 
     // No user-facing CancelImport method by design.
