@@ -181,6 +181,7 @@ public sealed class SecurityFoundationTests
         info.ArgumentList.Add(pipe.PipeName);
         using var worker = new Process { StartInfo = info };
         Assert.True(worker.Start());
+        using var job = WindowsWorkerJob.Attach(worker);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try
         {
