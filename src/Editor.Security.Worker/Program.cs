@@ -138,6 +138,23 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
     }
 }
 
+// Foreign AppContainer proof: only explicit ERROR_ACCESS_DENIED from CreateFile
+// on an existing pipe endpoint counts. A timeout or absent pipe is failure.
+if (args.Length == 2 && args[0] == "--probe-foreign-pipe")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess() ||
+        !args[1].StartsWith(WindowsWorkerPipe.Prefix, StringComparison.Ordinal))
+        return 70;
+    IntPtr handle = CreateFileW(@"\\.\pipe\" + args[1], 0xC0000000u, 0,
+        IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (handle != new IntPtr(-1))
+    {
+        CloseHandle(handle);
+        return 72; // Incorrectly granted access to a foreign package SID.
+    }
+    return Marshal.GetLastWin32Error() == 5 ? 0 : 73;
+}
+
 // Existing diagnostic IPC; media stays blocked.
 if (args.Length != 2 || args[0] != "--pipe")
 {
@@ -181,5 +198,8 @@ static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr toke
 [DllImport("advapi32.dll", SetLastError = true)]
 static extern bool GetTokenInformation(IntPtr token, int infoClass,
     out int value, int length, out int lengthReturned);
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+static extern IntPtr CreateFileW(string path, uint access, uint share, IntPtr security,
+    uint creation, uint flags, IntPtr templateFile);
 [DllImport("kernel32.dll")]
 static extern bool CloseHandle(IntPtr handle);
