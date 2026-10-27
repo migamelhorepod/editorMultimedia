@@ -3,7 +3,7 @@ param(
     [string]$Configuration = "Debug"
 )
 $ErrorActionPreference = "Stop"
-if (-not $IsWindows) { throw "Este empacotamento requer Windows 11." }
+if ($env:OS -ne "Windows_NT") { throw "Este empacotamento requer Windows." }
 
 $repo = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repo "src\Editor.Timeline.Wpf\Editor.Timeline.Wpf.csproj"
