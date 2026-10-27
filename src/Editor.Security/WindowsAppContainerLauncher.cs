@@ -117,6 +117,29 @@ public static class WindowsAppContainerLauncher
             "--process-metadata \"" + staged.Path + "\"", true);
     }
 
+    /// <summary>
+    /// Decode real registered media with FFmpeg inside the AppContainer into a
+    /// null sink (no exported media). Requires a separate ReadChunk task grant.
+    /// A private expendable copy receives only AppContainer read permission;
+    /// the original file ACL is never modified.
+    /// </summary>
+    public static int RunAuthorizedDecodeProcessing(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.ReadChunk)
+            throw new UnauthorizedAccessException("Real decoding requires a ReadChunk grant.");
+        string source = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
+        using var staged = new WindowsScopedCodecInput(source);
+        return LaunchDiagnostic(workerExecutable,
+            "--process-decode \"" + staged.Path + "\"", true);
+    }
+
     public static int RunAuthorizedCodecIsolationProbe(
         string workerExecutable, AuthorizedMediaCatalog catalog,
         WorkerRequest request, bool useFfmpeg)
@@ -182,7 +205,8 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             (arguments.StartsWith("--probe-ffprobe " + ((char)34), StringComparison.Ordinal) ||
              arguments.StartsWith("--probe-ffmpeg " + ((char)34), StringComparison.Ordinal) ||
-             arguments.StartsWith("--process-metadata " + ((char)34), StringComparison.Ordinal)) &&
+             arguments.StartsWith("--process-metadata " + ((char)34), StringComparison.Ordinal) ||
+             arguments.StartsWith("--process-decode " + ((char)34), StringComparison.Ordinal)) &&
             arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
         var isForeignProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
