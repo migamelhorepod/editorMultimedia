@@ -283,6 +283,12 @@ public partial class MainWindow : Window
 
     private async void ImportMedia_Click(object sender, RoutedEventArgs e)
     {
+        if (libraryStorageMonitor is null || !libraryStorageMonitor.Check())
+        {
+            MessageBox.Show(this, "A biblioteca ativa está indisponível. Verifique a pasta no disco D:.",
+                "Biblioteca indisponível", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         var picker = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Selecionar arquivos de vídeo, áudio ou imagem",
