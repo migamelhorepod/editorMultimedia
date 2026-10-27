@@ -17,6 +17,7 @@ test('BDD: Given external WAV, When imported into active physical library, Then 
   for (const state of states) expect(state.error).toBeNull();
   expect(states[0].project.media).toHaveLength(1);
   expect(states[0].project.clips).toHaveLength(1);
+  console.log('Physical import path check:', JSON.stringify({ library, stored: states[0].project.media[0].sourcePath, importResult: states[0].value }));
   expect(states[0].project.media[0].sourcePath.toLowerCase().startsWith(library.toLowerCase())).toBe(true);
   expect(states[1].value).toBe('duplicate');
   expect(await readdir(library)).toEqual(['physical-source.wav']);
