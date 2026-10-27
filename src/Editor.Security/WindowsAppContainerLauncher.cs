@@ -12,6 +12,9 @@ namespace Editor.Security;
 /// </summary>
 public static class WindowsAppContainerLauncher
 {
+    // xUnit runs sandbox tests across classes concurrently; Windows profile
+    // provisioning is serialized, while worker execution stays parallel.
+    private static readonly object ProfileCreationLock = new();
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private const uint CreateSuspended = 0x00000004;
     private static readonly nuint SecurityCapabilitiesAttribute = 0x00020009;
@@ -172,16 +175,22 @@ public static class WindowsAppContainerLauncher
         bool initialized = false;
         try
         {
-            int hr = CreateAppContainerProfile(
-                selectedProfile,
-                "Editor Multimedia Diagnostic", "POC-003.1 test-only profile",
-                IntPtr.Zero, 0, out sid);
-            // ERROR_ALREADY_EXISTS is expected on repeated CI runs.
-            if (hr == unchecked((int)0x800700B7))
-                hr = DeriveAppContainerSidFromAppContainerName(
-                    selectedProfile, out sid);
+            int hr;
+            lock (ProfileCreationLock)
+            {
+                hr = CreateAppContainerProfile(
+                    selectedProfile,
+                    "Editor Multimedia Diagnostic", "POC-003.1 test-only profile",
+                    IntPtr.Zero, 0, out sid);
+                // ERROR_ALREADY_EXISTS is expected on repeated CI runs.
+                if (hr == unchecked((int)0x800700B7))
+                    hr = DeriveAppContainerSidFromAppContainerName(
+                        selectedProfile, out sid);
+            }
             if (hr < 0 || sid == IntPtr.Zero)
-                Marshal.ThrowExceptionForHR(hr);
+                throw new COMException(
+                    $"Windows AppContainer profile provisioning failed for {selectedProfile}: HRESULT 0x{(uint)hr:X8}. No sandbox fallback permitted.",
+                    hr < 0 ? hr : unchecked((int)0x80004005));
 
             nuint bytes = 0;
             InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
