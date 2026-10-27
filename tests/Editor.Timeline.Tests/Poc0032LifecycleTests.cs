@@ -30,7 +30,7 @@ public sealed class Poc0032LifecycleTests
         var manager = new MediaImportCoordinator(Guid.NewGuid());
         var id = manager.BeginImport();
         Assert.Contains(id, manager.MarkStorageUnavailable());
-        Assert.Throws<IOException>(manager.BeginImport);
+        Assert.Throws<IOException>(() => { manager.BeginImport(); });
         Assert.False(manager.TryChangeLibrary(Guid.NewGuid()).Allowed);
     }
 
