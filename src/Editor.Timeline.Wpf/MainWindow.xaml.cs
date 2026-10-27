@@ -565,6 +565,13 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (importCoordinator.ActiveImports > 0)
+        {
+            e.Cancel = true;
+            MessageBox.Show(this, MediaImportCoordinator.BusyMessage,
+                "Importação em andamento", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (!ConfirmBeforeReplacingProject()) e.Cancel = true;
     }
 
