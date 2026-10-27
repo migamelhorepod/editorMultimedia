@@ -51,7 +51,8 @@ public sealed class WindowsAppContainerLauncherTests
         File.WriteAllText(privateFile, "Synthetic secret: never use private user data.");
         try
         {
-            Assert.Equal(0, WindowsAppContainerLauncher.RunDeniedFileProbe(worker, privateFile));
+            var code = WindowsAppContainerLauncher.RunDeniedFileProbe(worker, privateFile);
+            Assert.True(code == 0, $"Worker file probe exit code: {code} (0x{(uint)code:X8})");
         }
         finally
         {
@@ -73,7 +74,8 @@ public sealed class WindowsAppContainerLauncherTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Assert.Equal(0, WindowsAppContainerLauncher.RunDeniedNetworkProbe(worker, port));
+        var code = WindowsAppContainerLauncher.RunDeniedNetworkProbe(worker, port);
+        Assert.True(code == 0, $"Worker network probe exit code: {code} (0x{(uint)code:X8})");
     }
 
     [Fact]
