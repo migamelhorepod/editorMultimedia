@@ -34,6 +34,30 @@ public sealed class WindowsAppContainerLauncherTests
     }
 
     [Fact]
+    public void RealWorkerCannotReadPrivateFileInsideWindowsAppContainer()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var worker = Path.Combine(root, "src", "Editor.Security.Worker",
+            "bin", configuration, "net10.0", "Editor.Security.Worker.exe");
+        Assert.True(File.Exists(worker), $"Worker must be built: {worker}");
+        var privateFile = Path.Combine(Path.GetTempPath(),
+            "editor-poc003-private-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(privateFile, "Synthetic secret: never use private user data.");
+        try
+        {
+            Assert.Equal(0, WindowsAppContainerLauncher.RunDeniedFileProbe(worker, privateFile));
+        }
+        finally
+        {
+            File.Delete(privateFile);
+        }
+    }
+
+    [Fact]
     public void LauncherVerifiesKernelAppContainerTokenBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
