@@ -599,6 +599,37 @@ public partial class MainWindow : Window
             if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
         });
 
+    // Diagnostic only: exercises UI transition locks without claiming that
+    // an actual media file is being processed or changing any user data.
+    private async void SimulateBusyLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        if (libraryStorageMonitor is null || !libraryStorageMonitor.Check())
+        {
+            MessageBox.Show(this, "Ative uma biblioteca disponível no disco D: antes do diagnóstico.",
+                "Diagnóstico", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Guid task;
+        try { task = importCoordinator.BeginImport(); }
+        catch (IOException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Diagnóstico",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            MessageBox.Show(this, "Após clicar Ok, o estado ocupado permanecerá por 15 segundos. Teste troca, desativação e fechamento da janela. Nenhuma mídia será processada.",
+                "Diagnóstico de biblioteca ocupada", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Task.Delay(TimeSpan.FromSeconds(15));
+        }
+        finally
+        {
+            importCoordinator.CompleteImport(task);
+        }
+    }
+
     private void ChangeLibrary_Click(object sender, RoutedEventArgs e)
     {
         if (importCoordinator.ActiveImports > 0)
