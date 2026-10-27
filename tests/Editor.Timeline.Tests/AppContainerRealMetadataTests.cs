@@ -54,6 +54,8 @@ public sealed class AppContainerRealMetadataTests
                 task, library, resource, grant, MediaAccessOperation.InspectMetadata);
             Assert.Equal(0, WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(
                 worker, catalog, request));
+            Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
+            Assert.True(File.Exists(wav));
             registry.RevokeTask(task);
             Assert.Throws<UnauthorizedAccessException>(() =>
                 WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(worker, catalog, request));
