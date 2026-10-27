@@ -40,7 +40,7 @@ jobs:
                 # can inspect LASTEXITCODE. Keep the final failure fail-closed.
                 Write-Warning "Chocolatey attempt $attempt returned an error: $_"
               }
-              if ($LASTEXITCODE -eq 0 -and (Get-Command ffprobe -ErrorAction SilentlyContinue)) { $installed = $true; break }
+              if ($LASTEXITCODE -eq 0) { $installed = $true; break }
               Write-Warning "FFmpeg repository unavailable (attempt $attempt of 3)."
               if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt) }
             }
