@@ -307,7 +307,22 @@ public partial class MainWindow : Window
         {
             try
             {
-                var asset = await Task.Run(() => MediaReferences.InspectFile(path));
+                // External media is first copied into the active physical library
+                // with a private partial file and an atomic final rename.
+                var stored = await new LibraryFileStore(libraryRootPath).ImportAsync(path);
+                MediaAsset asset;
+                try
+                {
+                    asset = await Task.Run(() => MediaReferences.InspectFile(stored.Path));
+                }
+                catch (MediaReferenceException)
+                {
+                    // An undecodable NEW import must not pollute the library.
+                    // Existing/reused media is never deleted by this action.
+                    if (stored.NewlyCopied && File.Exists(stored.Path))
+                        File.Delete(stored.Path);
+                    throw;
+                }
                 if (libraryStorageMonitor is not null && !libraryStorageMonitor.Check())
                     throw new IOException("Biblioteca indisponível durante a importação.");
                 if (mediaAssets.Any(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath)))
