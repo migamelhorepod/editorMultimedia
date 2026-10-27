@@ -36,6 +36,35 @@ public sealed class AuthorizedMediaCatalogTests
     }
 
     [Fact]
+    public void RealMetadataWorkerRejectsRevokedAndWrongOperationBeforeLaunch()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "appcontainer-real-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string media = Path.Combine(folder, "media.wav");
+        File.WriteAllBytes(media, [1, 2, 3]);
+        try
+        {
+            Guid library = Guid.NewGuid(), task = Guid.NewGuid(), resource = Guid.NewGuid();
+            var registry = new AccessGrantRegistry(library);
+            var catalog = new AuthorizedMediaCatalog(folder, registry);
+            catalog.Register(resource, media);
+            Guid grant = registry.Issue(task, library, resource,
+                MediaAccessOperation.InspectMetadata, TimeSpan.FromMinutes(1));
+            var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
+                task, library, resource, grant, MediaAccessOperation.InspectMetadata);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(
+                    "nonexistent-worker.exe", catalog,
+                    request with { Operation = MediaAccessOperation.ReadChunk }));
+            registry.RevokeTask(task);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(
+                    "nonexistent-worker.exe", catalog, request));
+        }
+        finally { Directory.Delete(folder, true); }
+    }
+
+    [Fact]
     public void ParentEscapeAndLinkToAnotherLibraryCannotBeRegistered()
     {
         string folder = Path.Combine(Path.GetTempPath(), "poc003-root-" + Guid.NewGuid().ToString("N"));
