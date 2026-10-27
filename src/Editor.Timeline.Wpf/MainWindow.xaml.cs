@@ -679,7 +679,7 @@ public partial class MainWindow : Window
         if (media is not null) RelinkAsset(media);
     }
 
-    private void RelinkAsset(MediaAsset media)
+    private async void RelinkAsset(MediaAsset media)
     {
         var filter = media.Kind switch
         {
@@ -695,20 +695,33 @@ public partial class MainWindow : Window
             CheckFileExists = true, Multiselect = false
         };
         if (dialog.ShowDialog(this) != true) return;
+        Guid? operation = null;
         try
         {
-            session.RelinkMedia(media.Id, dialog.FileName);
+            operation = importCoordinator.BeginImport();
+            ImportStatus.Text = "Relocalizando e verificando mídia no worker AppContainer...";
+            // A relinked external file must enter the active physical library
+            // before any codec is allowed to inspect it.
+            var stored = await new LibraryFileStore(libraryRootPath).ImportAsync(dialog.FileName);
+            var verified = await InspectLibraryAssetInSandboxAsync(stored.Path);
+            session.RelinkMediaInspected(media.Id, verified);
             mediaAssets = session.Media.ToList();
             RefreshMediaPresence();
             UpdateDirty();
             Draw();
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or
+            OverflowException or Win32Exception or System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
             MessageBox.Show(this,
                 $"Não foi possível relocalizar a mídia, a referência original foi preservada\n{ex.Message}",
                 "Relocalização não realizada", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (operation is Guid task) importCoordinator.CompleteImport(task);
+            ImportStatus.Text = "";
         }
     }
 
