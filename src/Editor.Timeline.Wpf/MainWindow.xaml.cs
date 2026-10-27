@@ -603,23 +603,33 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
+    private async void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
     {
         var asset = CatalogSelection();
         if (asset is null) return;
+        Guid? operation = null;
         try
         {
-            session.RefreshMediaMetadata(asset.Id);
+            operation = importCoordinator.BeginImport();
+            ImportStatus.Text = "Atualizando metadados no worker AppContainer...";
+            var inspected = await InspectLibraryAssetInSandboxAsync(asset.SourcePath);
+            session.RefreshMediaMetadataInspected(asset.Id, inspected);
             mediaAssets = session.Media.ToList();
             availableMedia[asset.Id] = MediaReferences.IsAvailable(asset);
             UpdateDirty();
             Draw();
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or
+            Win32Exception or System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
             MessageBox.Show(this, ex.Message, "Não foi possível atualizar os dados",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (operation is Guid task) importCoordinator.CompleteImport(task);
+            ImportStatus.Text = "";
         }
     }
 
