@@ -110,8 +110,11 @@ public static class WindowsAppContainerLauncher
             throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
         if (authorizedPath.IndexOfAny(['"', '\r', '\n']) >= 0)
             throw new UnauthorizedAccessException("Invalid authorized file path.");
+        using var staged = new WindowsScopedCodecInput(authorizedPath);
+        // The copy is destroyed only after LaunchDiagnostic has exited/killed
+        // its suspended-start, token-verified, resource-limited child Job.
         return LaunchDiagnostic(workerExecutable,
-            "--process-metadata \"" + authorizedPath + "\"", true);
+            "--process-metadata \"" + staged.Path + "\"", true);
     }
 
     public static int RunAuthorizedCodecIsolationProbe(
