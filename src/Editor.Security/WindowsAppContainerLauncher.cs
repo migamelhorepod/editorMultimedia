@@ -33,8 +33,14 @@ public static class WindowsAppContainerLauncher
         bool initialized = false;
         try
         {
-            int hr = DeriveAppContainerSidFromAppContainerName(
-                WindowsAppContainerPreflight.ProfileName, out sid);
+            int hr = CreateAppContainerProfile(
+                WindowsAppContainerPreflight.ProfileName,
+                "Editor Multimedia Diagnostic", "POC-003.1 test-only profile",
+                IntPtr.Zero, 0, out sid);
+            // ERROR_ALREADY_EXISTS is expected on repeated CI runs.
+            if (hr == unchecked((int)0x800700B7))
+                hr = DeriveAppContainerSidFromAppContainerName(
+                    WindowsAppContainerPreflight.ProfileName, out sid);
             if (hr < 0 || sid == IntPtr.Zero)
                 Marshal.ThrowExceptionForHR(hr);
 
@@ -119,6 +125,9 @@ public static class WindowsAppContainerLauncher
         public uint dwProcessId, dwThreadId;
     }
 
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
+    private static extern int CreateAppContainerProfile(string name, string displayName,
+        string description, IntPtr capabilities, uint capabilityCount, out IntPtr sid);
     [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
     private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
     [DllImport("advapi32.dll")]
