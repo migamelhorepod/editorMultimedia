@@ -144,7 +144,7 @@ if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ff
                 !double.TryParse(durationLine.Trim()["duration=".Length..],
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
-                (!double.IsFinite(duration) || (args[0] == "--process-metadata" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)))
+                (!double.IsFinite(duration) || (args[0] is "--process-metadata" or "--process-metadata-report" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)))
                 return 79; // Reject missing or invalid metadata values.
             if (args[0] == "--process-metadata-report")
             {
