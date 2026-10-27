@@ -8,6 +8,30 @@ param(
     [string] $ProbeEndUtc = ""
 )
 $ErrorActionPreference = "Stop"
+# Windows Security 5157 records NT device paths (\Device\HarddiskVolume...),
+# whereas the launcher knows a DOS path (D:\...). Resolve the same binary
+# through QueryDosDevice instead of using basename-only matching.
+$nativeWorkerPath = ""
+if ($WorkerPath) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class PocWfpDevicePath {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    public static extern uint QueryDosDevice(string device, StringBuilder result, uint maxChars);
+}
+'@
+    $fullWorker = [System.IO.Path]::GetFullPath($WorkerPath)
+    $drive = [System.IO.Path]::GetPathRoot($fullWorker).TrimEnd('\')
+    $buffer = [System.Text.StringBuilder]::new(4096)
+    $length = [PocWfpDevicePath]::QueryDosDevice($drive, $buffer, 4096)
+    if ($length -gt 0) {
+        $device = $buffer.ToString().Split([char]0)[0]
+        $nativeWorkerPath = $device + $fullWorker.Substring($drive.Length)
+    }
+}
+
 # Read-only: requires prior WFP audit configuration; never enable auditpol in CI.
 $policy = (& auditpol.exe /get /subcategory:"Filtering Platform Connection" 2>&1 | Out-String)
 $policyExit = $LASTEXITCODE
@@ -32,7 +56,7 @@ try {
         $port = $fields['DestPort']
         if (-not $destination) { $destination = $fields['DestinationAddress'] }
         if (-not $port) { $port = $fields['DestinationPort'] }
-        $workerMatches = $WorkerPath -and $pathValue -and ([string]::Equals($pathValue, $WorkerPath, [StringComparison]::OrdinalIgnoreCase))
+        $workerMatches = $WorkerPath -and $pathValue -and (([string]::Equals($pathValue, $WorkerPath, [StringComparison]::OrdinalIgnoreCase)) -or ($nativeWorkerPath -and [string]::Equals($pathValue, $nativeWorkerPath, [StringComparison]::OrdinalIgnoreCase)))
         if ($event.Id -eq 5157) {
             $blockedEventCount++
             if ($fields['ProcessID'] -eq "$WorkerProcessId") { $samePid++ }
@@ -58,6 +82,7 @@ $report = [ordered]@{
     destinationAddress = $DestinationAddress
     destinationPort = $DestinationPort
     workerPath = $WorkerPath
+    workerPathNt = $nativeWorkerPath
     workerProcessId = $WorkerProcessId
     eventCount = @($events).Count
     blockedEventCount = $blockedEventCount
