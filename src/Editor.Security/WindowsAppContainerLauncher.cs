@@ -100,9 +100,20 @@ public static class WindowsAppContainerLauncher
         return LaunchDiagnostic(workerExecutable, command, true);
     }
 
+    public static int RunForeignAppContainerPipeProbe(string workerExecutable, string pipeName)
+    {
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) ||
+            pipeName.Length != WindowsWorkerPipe.Prefix.Length + 32 ||
+            !pipeName.StartsWith(WindowsWorkerPipe.Prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(pipeName.AsSpan(WindowsWorkerPipe.Prefix.Length), "N", out _))
+            throw new UnauthorizedAccessException("Invalid foreign AppContainer pipe probe.");
+        return LaunchDiagnostic(workerExecutable, "--probe-foreign-pipe " + pipeName,
+            true, profileName: WindowsAppContainerPreflight.ProfileName + ".ForeignSecurityTest");
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
-        Action<int>? processVerified = null)
+        Action<int>? processVerified = null, string? profileName = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -133,7 +144,11 @@ public static class WindowsAppContainerLauncher
             (arguments.StartsWith("--probe-ffprobe " + ((char)34), StringComparison.Ordinal) ||
              arguments.StartsWith("--probe-ffmpeg " + ((char)34), StringComparison.Ordinal)) &&
             arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe)
+        var isForeignProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--probe-foreign-pipe editor-poc003-", StringComparison.Ordinal) &&
+            profileName == WindowsAppContainerPreflight.ProfileName + ".ForeignSecurityTest" && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -141,6 +156,7 @@ public static class WindowsAppContainerLauncher
         if (!run && !isInertCommand)
             throw new UnauthorizedAccessException("Suspended diagnostics only support the inert command.");
 
+        string selectedProfile = profileName ?? WindowsAppContainerPreflight.ProfileName;
         IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, capabilitiesPtr = IntPtr.Zero;
         PROCESS_INFORMATION process = default;
         WindowsWorkerJob? resourceJob = null;
@@ -148,13 +164,13 @@ public static class WindowsAppContainerLauncher
         try
         {
             int hr = CreateAppContainerProfile(
-                WindowsAppContainerPreflight.ProfileName,
+                selectedProfile,
                 "Editor Multimedia Diagnostic", "POC-003.1 test-only profile",
                 IntPtr.Zero, 0, out sid);
             // ERROR_ALREADY_EXISTS is expected on repeated CI runs.
             if (hr == unchecked((int)0x800700B7))
                 hr = DeriveAppContainerSidFromAppContainerName(
-                    WindowsAppContainerPreflight.ProfileName, out sid);
+                    selectedProfile, out sid);
             if (hr < 0 || sid == IntPtr.Zero)
                 Marshal.ThrowExceptionForHR(hr);
 
