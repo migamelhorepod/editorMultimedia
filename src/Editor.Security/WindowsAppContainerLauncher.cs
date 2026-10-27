@@ -28,6 +28,24 @@ public static class WindowsAppContainerLauncher
         return LaunchDiagnostic(executable, "/c exit 0", true);
     }
 
+    /// <summary>
+    /// Exercise a real .NET worker inside AppContainer against an existing
+    /// protected file. Zero means the kernel denied access, not a file error.
+    /// Never pass a media file; only private synthetic test fixtures.
+    /// </summary>
+    public static int RunDeniedFileProbe(string workerExecutable, string protectedFile)
+    {
+        if (!Path.IsPathFullyQualified(protectedFile) || !File.Exists(protectedFile) ||
+            protectedFile.Contains(\'"\') || protectedFile.Contains(\'\\n\') ||
+            protectedFile.Contains(\'\\r\'))
+            throw new ArgumentException("Existing absolute test fixture required.", nameof(protectedFile));
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
+            StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the dedicated worker executable is permitted.");
+        return LaunchDiagnostic(workerExecutable,
+            "--probe-denied-file \\"" + protectedFile + "\\"", true);
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run)
     {
         if (!OperatingSystem.IsWindows())
@@ -36,15 +54,21 @@ public static class WindowsAppContainerLauncher
             || !File.Exists(executable))
             throw new ArgumentException("An existing absolute executable path is required.", nameof(executable));
         // Never accept a caller-supplied path to media or unspecified executable.
-        if (!string.Equals(Path.GetFullPath(executable),
-                Path.GetFullPath(Path.Combine(Environment.SystemDirectory, "cmd.exe")),
-                StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Diagnostic launcher only permits Windows cmd.exe.");
+        var isInertCommand = string.Equals(Path.GetFullPath(executable),
+            Path.GetFullPath(Path.Combine(Environment.SystemDirectory, "cmd.exe")),
+            StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(arguments, "/c exit 0", StringComparison.Ordinal);
+        var isWorkerProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--probe-denied-file \\"", StringComparison.Ordinal) &&
+            arguments.EndsWith("\\"", StringComparison.Ordinal) && run;
+        if (!isInertCommand && !isWorkerProbe)
+            throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
         // This process remains suspended and is terminated before executing.
-        if (!string.Equals(arguments, "/c exit 0", StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("Only the fixed inert diagnostic command is permitted.");
+        if (!run && !isInertCommand)
+            throw new UnauthorizedAccessException("Suspended diagnostics only support the inert command.");
 
         IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, capabilitiesPtr = IntPtr.Zero;
         PROCESS_INFORMATION process = default;
