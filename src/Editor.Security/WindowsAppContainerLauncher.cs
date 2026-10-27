@@ -70,8 +70,23 @@ public static class WindowsAppContainerLauncher
                 IntPtr.Zero, Environment.SystemDirectory, ref startup, out process))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     "Windows refused the AppContainer diagnostic process.");
-            // A suspended process cannot execute until the owner explicitly
-            // resumes its thread; this API intentionally never resumes it.
+            // Verify the real process token; requesting a sandbox is not proof.
+            if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Cannot inspect AppContainer token.");
+            try
+            {
+                if (!GetTokenInformation(token, 29, out int isAppContainer,
+                    sizeof(int), out int returned) || returned != sizeof(int) ||
+                    isAppContainer != 1)
+                    throw new UnauthorizedAccessException(
+                        "Process lacks a Windows AppContainer token.");
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+            // Never resume this process: OS access probes remain pending.
             return checked((int)process.dwProcessId);
         }
         finally
@@ -144,6 +159,11 @@ public static class WindowsAppContainerLauncher
         IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
         uint flags, IntPtr environment, string workingDirectory,
         ref STARTUPINFOEX startup, out PROCESS_INFORMATION information);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int informationClass,
+        out int information, int length, out int returnLength);
     [DllImport("kernel32.dll")]
     private static extern bool TerminateProcess(IntPtr process, uint exitCode);
     [DllImport("kernel32.dll")]
