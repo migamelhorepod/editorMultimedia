@@ -13,7 +13,7 @@ public static class WindowsAppContainerLauncher
 {
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private const uint CreateSuspended = 0x00000004;
-    private const nuint SecurityCapabilitiesAttribute = 0x00020009;
+    private static readonly nuint SecurityCapabilitiesAttribute = 0x00020009;
 
     public static int StartSuspended(string executable, string arguments)
     {
