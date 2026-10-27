@@ -28,6 +28,11 @@ public static class WindowsAppContainerLauncher
                 StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Diagnostic launcher only permits Windows cmd.exe.");
 
+        // No arbitrary command line may reach a diagnostic shell.
+        // This process remains suspended and is terminated before executing.
+        if (!string.Equals(arguments, "/c exit 0", StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Only the fixed inert diagnostic command is permitted.");
+
         IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, capabilitiesPtr = IntPtr.Zero;
         PROCESS_INFORMATION process = default;
         bool initialized = false;
