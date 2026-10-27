@@ -34,6 +34,22 @@ public sealed class RestrictedWorkerPipePolicyTests
     }
 
     [Fact]
+    public async Task RestrictedPipeHandshakeReturnsMatchingResponse()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var pipe = new WindowsWorkerPipe(new AccessGrantRegistry(Guid.NewGuid()));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+        var server = pipe.ServeRestrictedOnceAsync(Environment.ProcessId, timeout.Token);
+        var request = WorkerRequest.Heartbeat();
+        var reply = await WindowsWorkerPipe.ConnectRestrictedOnceAsync(
+            pipe.PipeName, request, timeout.Token);
+        var observed = await server;
+        Assert.Equal(request.RequestId, reply.RequestId);
+        Assert.Equal(request.RequestId, observed.RequestId);
+        Assert.False(MediaWorkerAdmission.IsMediaProcessingAvailable);
+    }
+
+    [Fact]
     public async Task RestrictedPipeRejectsUnexpectedClientProcessId()
     {
         if (!OperatingSystem.IsWindows()) return;
