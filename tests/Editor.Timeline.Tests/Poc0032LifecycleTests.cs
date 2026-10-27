@@ -97,6 +97,47 @@ public sealed class Poc0032LifecycleTests
     }
 
     [Fact]
+    public void ForcedChildProcessTerminationRecoversOnlyIncompleteResult()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string root = Path.Combine(Path.GetTempPath(), "poc0032-forced-" + Guid.NewGuid().ToString("N"));
+        var recovery = new MediaResultRecovery(root);
+        Guid done = Guid.NewGuid(), pending = Guid.NewGuid();
+        File.WriteAllText(recovery.Begin(done), "completed");
+        recovery.Commit(done);
+        string partial = recovery.Begin(pending);
+        var info = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true
+        };
+        info.ArgumentList.Add("-NoProfile");
+        info.ArgumentList.Add("-NonInteractive");
+        info.ArgumentList.Add("-Command");
+        info.ArgumentList.Add("[IO.File]::AppendAllText($args[0], 'interrupted'); Start-Sleep -Seconds 20");
+        info.ArgumentList.Add(partial);
+        using var child = System.Diagnostics.Process.Start(info)
+            ?? throw new InvalidOperationException("Cannot start crash fixture.");
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(
+                () => File.Exists(partial) && new FileInfo(partial).Length > 0,
+                TimeSpan.FromSeconds(8)), "Crash fixture did not write partial result.");
+            child.Kill(entireProcessTree: true);
+            Assert.True(child.WaitForExit(5000));
+            var recovered = new MediaResultRecovery(root).Recover();
+            Assert.Equal(1, recovered.IncompleteDiscarded);
+            Assert.Equal(1, recovered.CompletedPreserved);
+            Assert.False(File.Exists(partial));
+            Assert.True(File.Exists(Path.Combine(root, done.ToString("N") + ".complete")));
+        }
+        finally
+        {
+            if (!child.HasExited) child.Kill(entireProcessTree: true);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void StartupRecoveryRejectsCorruptedCompletedOutput()
     {
         string folder = Path.Combine(Path.GetTempPath(), "poc0032-integrity-" + Guid.NewGuid().ToString("N"));
