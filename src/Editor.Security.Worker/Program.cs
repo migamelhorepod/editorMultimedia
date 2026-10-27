@@ -91,7 +91,7 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
-if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg"))
+if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" || args[0] == "--process-metadata"))
 {
     if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
     if (!Path.IsPathFullyQualified(args[1])) return 71;
@@ -142,7 +142,7 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
                 !double.TryParse(durationLine.Trim()["duration=".Length..],
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
-                duration is < 0.09 or > 0.11)
+                (args[0] == "--process-metadata" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)
                 return 79; // ffprobe must decode metadata of the granted 0.10 s WAV.
         }
         return 0;
