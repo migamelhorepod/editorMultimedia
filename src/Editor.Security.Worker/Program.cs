@@ -128,8 +128,24 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
         using var process = Process.Start(start);
         if (process is null) return 76;
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var output = process.StandardOutput.ReadToEndAsync(cancel.Token);
+        var error = process.StandardError.ReadToEndAsync(cancel.Token);
         await process.WaitForExitAsync(cancel.Token);
-        return process.ExitCode == 0 ? 0 : 77;
+        var stdout = await output;
+        _ = await error;
+        if (process.ExitCode != 0) return 77;
+        if (tool == "ffprobe.exe")
+        {
+            var durationLine = stdout.Split('\n').FirstOrDefault(
+                line => line.Trim().StartsWith("duration=", StringComparison.Ordinal));
+            if (durationLine is null ||
+                !double.TryParse(durationLine.Trim()["duration=".Length..],
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
+                duration is < 0.09 or > 0.11)
+                return 79; // ffprobe must decode metadata of the granted 0.10 s WAV.
+        }
+        return 0;
     }
     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or
         System.ComponentModel.Win32Exception or OperationCanceledException)
