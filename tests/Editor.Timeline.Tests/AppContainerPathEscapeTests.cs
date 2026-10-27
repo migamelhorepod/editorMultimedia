@@ -6,6 +6,35 @@ namespace Editor.Timeline.Tests;
 public sealed class AppContainerPathEscapeTests
 {
     [Fact]
+    public void DirectoryReparsePointCannotEscapeToOtherLibrary()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var worker = Path.Combine(root, "TestResults", "sandbox-worker",
+            "Editor.Security.Worker.exe");
+        string main = Path.Combine(Path.GetTempPath(), "poc003-main-" + Guid.NewGuid().ToString("N"));
+        string inactive = Path.Combine(Path.GetTempPath(), "poc003-inactive-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(main);
+        Directory.CreateDirectory(inactive);
+        string privateFile = Path.Combine(inactive, "not-granted.wav");
+        File.WriteAllBytes(privateFile, new byte[] { 0, 1, 2 });
+        try
+        {
+            string link = Path.Combine(main, "other-library");
+            Directory.CreateSymbolicLink(link, inactive);
+            string escapePath = Path.Combine(link, "not-granted.wav");
+            Assert.True(File.Exists(escapePath));
+            Assert.Equal(0, WindowsAppContainerLauncher.RunDeniedFileProbe(worker, escapePath));
+        }
+        finally
+        {
+            Directory.Delete(main, true);
+            Directory.Delete(inactive, true);
+        }
+    }
+
+    [Fact]
     public void SymbolicLinkCannotEscapeToPrivateUnsharedFile()
     {
         if (!OperatingSystem.IsWindows()) return;
