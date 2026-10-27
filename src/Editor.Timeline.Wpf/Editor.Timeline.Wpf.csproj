@@ -8,15 +8,5 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\Editor.Timeline\Editor.Timeline.csproj" /><ProjectReference Include="..\Editor.Security\Editor.Security.csproj" /><ProjectReference Include="..\Editor.Security.Worker\Editor.Security.Worker.csproj" ReferenceOutputAssembly="false" /></ItemGroup>
-  <!-- Build the dedicated worker when building the editor. Never execute a
-       codec in the editor process; codecs must live next to the isolated worker. -->
-  <Target Name="CopyAppContainerWorker" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
-    <ItemGroup>
-      <_SandboxWorkerFile Include="$(MSBuildProjectDirectory)\..\Editor.Security.Worker\bin\$(Configuration)\net10.0\Editor.Security.Worker.*"/>
-      <_SandboxWorkerFile Include="$(MSBuildProjectDirectory)\..\Editor.Security.Worker\bin\$(Configuration)\net10.0\Editor.Security.dll"/>
-    </ItemGroup>
-    <MakeDir Directories="$(TargetDir)worker"/>
-    <Copy SourceFiles="@(_SandboxWorkerFile)" DestinationFolder="$(TargetDir)worker"
-          SkipUnchangedFiles="true" Condition="'@(_SandboxWorkerFile)' != ''"/>
-  </Target>
+
 </Project>
