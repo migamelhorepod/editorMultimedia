@@ -315,7 +315,27 @@ public partial class MainWindow : Window
                 MediaAsset asset;
                 try
                 {
-                    asset = await Task.Run(() => MediaReferences.InspectFile(stored.Path));
+                    // All actual probing/decoding of new media executes in the
+                    // verified AppContainer worker; never in the WPF process.
+                    asset = await Task.Run(() =>
+                    {
+                        if (!MediaReferences.TryDetectKind(stored.Path, out var mediaKind))
+                            throw new MediaReferenceException("Extensão não suportada.");
+                        var file = new FileInfo(stored.Path);
+                        if (!file.Exists || file.Length <= 0)
+                            throw new MediaReferenceException("Arquivo indisponível ou vazio.");
+                        var workerExe = Path.Combine(AppContext.BaseDirectory,
+                            "worker", "Editor.Security.Worker.exe");
+                        var processor = new IsolatedMediaProcessingService(
+                            libraryRootPath, importCoordinator.ActiveLibrary, workerExe);
+                        long? duration = null;
+                        if (mediaKind is MediaKind.Video or MediaKind.Audio)
+                            duration = processor.InspectDurationTicks(file.FullName);
+                        else
+                            processor.DecodeToNull(file.FullName);
+                        return new MediaAsset(Guid.NewGuid(), mediaKind,
+                            file.Name, file.FullName, file.Length, duration);
+                    });
                 }
                 catch (Exception ex) when (ex is MediaReferenceException or
                     NotSupportedException or InvalidDataException or ArgumentException)
@@ -349,7 +369,8 @@ public partial class MainWindow : Window
                 added++;
             }
             catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-                IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+                IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException or
+                Win32Exception or System.Runtime.InteropServices.COMException)
             {
                 errors.Add($"{System.IO.Path.GetFileName(path)}: {ex.Message}");
             }
