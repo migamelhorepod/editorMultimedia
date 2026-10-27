@@ -50,6 +50,35 @@ public sealed class RestrictedWorkerPipePolicyTests
     }
 
     [Fact]
+    public async Task RestrictedPipeRejectsSeparateUnauthorizedProcess()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var clientScript = Path.Combine(root, "tests", "security", "unauthorized-pipe-client.ps1");
+        Assert.True(File.Exists(clientScript));
+        var pipe = new WindowsWorkerPipe(new AccessGrantRegistry(Guid.NewGuid()));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(9));
+        var server = pipe.ServeRestrictedOnceAsync(Environment.ProcessId, deadline.Token);
+        var start = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-File");
+        start.ArgumentList.Add(clientScript);
+        start.ArgumentList.Add(pipe.PipeName);
+        using var attacker = System.Diagnostics.Process.Start(start)
+            ?? throw new InvalidOperationException("Cannot start negative IPC client.");
+        Assert.NotEqual(Environment.ProcessId, attacker.Id);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () => await server);
+        Assert.True(attacker.WaitForExit(5000), "Attacker process remained alive.");
+        Assert.Equal(0, attacker.ExitCode);
+    }
+
+    [Fact]
     public async Task RestrictedPipeRejectsUnexpectedClientProcessId()
     {
         if (!OperatingSystem.IsWindows()) return;
