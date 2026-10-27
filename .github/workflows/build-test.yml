@@ -62,6 +62,12 @@ jobs:
         run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
 
       # Default success() condition: integration never runs after a failed unit step.
+      - name: Coletar evidencias WFP SEC-006 (somente leitura)
+        if: always()
+        shell: pwsh
+        run: |
+          ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json"
+
       - name: Preparar Node.js 24 LTS
         uses: actions/setup-node@v5
         with:
