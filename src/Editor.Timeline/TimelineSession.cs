@@ -118,6 +118,43 @@ public sealed class TimelineSession
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
     }
 
+    /// <summary>
+    /// Remove one asset and every occurrence on the timeline as one undoable
+    /// project change. Source files on disk are never deleted.
+    /// </summary>
+    public void DeleteCatalogMedia(Guid mediaId)
+    {
+        if (!Media.Any(m => m.Id == mediaId))
+            throw new MediaReferenceException("Mídia não encontrada no catálogo.");
+        var nextMedia = Media.Where(m => m.Id != mediaId).ToArray();
+        Execute(state =>
+        {
+            var working = state;
+            var affected = new HashSet<Guid>();
+            // Delete main occurrences first so the same reflow/detachment
+            // semantics as normal timeline deletion are preserved.
+            var ids = state.Clips.Where(c => c.MediaId == mediaId)
+                .OrderBy(c => c.Track == TimelineEngine.MainTrack ? 0 : 1)
+                .ThenBy(c => c.Start.Ticks)
+                .Select(c => c.Id).ToArray();
+            foreach (var id in ids)
+            {
+                var clip = working.Find(id);
+                var result = clip.Track == TimelineEngine.MainTrack
+                    ? TimelineEngine.DeleteMain(working, working.Version, id)
+                    : TimelineEngine.DeleteSecondary(working, working.Version, id);
+                working = result.State;
+                affected.UnionWith(result.AffectedIds);
+            }
+            if (ids.Length == 0)
+                working = working with { Version = checked(state.Version + 1) };
+            else
+                working = working with { Version = checked(state.Version + 1) };
+            TimelineEngine.Validate(working);
+            return new CommandResult(working, affected.ToArray());
+        }, nextMedia);
+    }
+
     public TimelineState Undo()
     {
         if (!CanUndo) throw new TimelineException("NOTHING_TO_UNDO", "Undo stack is empty.");
