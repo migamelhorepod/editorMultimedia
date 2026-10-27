@@ -97,6 +97,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         libraryStorageMonitor = CreateStorageMonitor(libraryRootPath);
         libraryStorageMonitor.Check();
+        RecoverLibraryCopiesAtStartup();
         storageTimer.Tick += (_, _) =>
         {
             if (libraryStorageMonitor is null) return;
@@ -673,6 +674,24 @@ public partial class MainWindow : Window
             if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
         });
 
+    private void RecoverLibraryCopiesAtStartup()
+    {
+        if (libraryStorageMonitor is null || !libraryStorageMonitor.Check()) return;
+        try
+        {
+            int removed = new LibraryFileStore(libraryRootPath).RecoverInterruptedImports();
+            if (removed > 0)
+                MessageBox.Show(this,
+                    $"{removed} importação(ões) interrompida(s) foram descartadas. Nenhuma mídia concluída foi apagada.",
+                    "Recuperação da biblioteca", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, "Não foi possível recuperar importações interrompidas: " + ex.Message,
+                "Recuperação da biblioteca", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void ChangeLibrary_Click(object sender, RoutedEventArgs e)
     {
         if (importCoordinator.ActiveImports > 0)
@@ -693,6 +712,7 @@ public partial class MainWindow : Window
         libraryRootPath = picker.FolderName;
         libraryStorageMonitor = CreateStorageMonitor(libraryRootPath);
         libraryStorageMonitor.Check();
+        RecoverLibraryCopiesAtStartup();
     }
 
     private void DeactivateLibrary_Click(object sender, RoutedEventArgs e)
