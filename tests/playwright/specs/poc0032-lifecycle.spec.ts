@@ -24,10 +24,14 @@ test('POC-003.2: unavailable storage stops affected tasks and forbids new import
     { op: 'beginImportLifecycle' },
     { op: 'diskOnlineLifecycle' },
     { op: 'beginImportLifecycle' },
+    { op: 'finishImportLifecycle' },
+    { op: 'beginImportLifecycle' },
   ]);
   const lost = results[1].value as { available: boolean; terminated: number; active: number };
-  expect(lost).toEqual({ available: false, terminated: 1, active: 0 });
+  expect(lost).toEqual({ available: false, terminated: 1, active: 1 });
   expect(results[2].error?.type).toBe('IOException');
   expect((results[3].value as { available: boolean }).available).toBe(true);
-  expect(results[4].error).toBeNull();
+  expect(results[4].error?.type).toBe('IOException');
+  expect(results[5].error).toBeNull();
+  expect(results[6].error).toBeNull();
 });
