@@ -1,8 +1,9 @@
 namespace Editor.Security;
 
 /// <summary>
-/// Fault handling is a technical shutdown, never a user import cancellation.
-/// The caller provides the actual worker job disposal and UI shutdown actions.
+/// Handles technical faults, never voluntary cancellation of an import.
+/// Dispose of the Job before notifying the UI: KILL_ON_JOB_CLOSE removes worker
+/// processes and their open handles even when the worker is unresponsive.
 /// </summary>
 public sealed class WorkerFailureSupervisor
 {
@@ -10,35 +11,33 @@ public sealed class WorkerFailureSupervisor
     public static readonly TimeSpan MaximumShutdown = TimeSpan.FromSeconds(30);
 
     private readonly AccessGrantRegistry registry;
-    private readonly Func<Task> terminateWorker;
+    private readonly IDisposable workerJob;
     private readonly Func<Task> closeApplication;
 
     public WorkerFailureSupervisor(AccessGrantRegistry registry,
-        Func<Task> terminateWorker, Func<Task> closeApplication)
+        IDisposable workerJob, Func<Task> closeApplication)
     {
         this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        this.terminateWorker = terminateWorker ?? throw new ArgumentNullException(nameof(terminateWorker));
+        this.workerJob = workerJob ?? throw new ArgumentNullException(nameof(workerJob));
         this.closeApplication = closeApplication ?? throw new ArgumentNullException(nameof(closeApplication));
     }
 
     public async Task<string> HandleFailureAsync(Guid taskId)
     {
-        // Revoke logical access first; terminate the owner Job to close opened
-        // kernel handles. An unresponsive process is not trusted to cooperate.
+        // No user cancel command exists; this method may only be invoked
+        // after a technical fault or an unavailable backing store.
         registry.RevokeTask(taskId);
-        using var limit = new CancellationTokenSource(MaximumShutdown);
+        workerJob.Dispose(); // Synchronous Windows handle close is critical.
+        // At this point the worker's Job handle must be gone.
+        using var timeout = new CancellationTokenSource(MaximumShutdown);
         try
         {
-            await terminateWorker().WaitAsync(limit.Token).ConfigureAwait(false);
+            await closeApplication().WaitAsync(timeout.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (limit.IsCancellationRequested)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            // Do not claim successful cleanup when the termination implementation
-            // fails to honor its deadline. The caller must independently enforce
-            // Job-object KILL_ON_JOB_CLOSE.
-            throw new TimeoutException("Worker could not be confirmed terminated within 30 seconds.");
+            throw new TimeoutException("Application did not terminate within the 30-second fault policy.");
         }
-        await closeApplication().WaitAsync(limit.Token).ConfigureAwait(false);
         return PopupMessage;
     }
 }
