@@ -113,6 +113,10 @@ public static class WindowsAppContainerLauncher
         if (authorizedPath.IndexOfAny(['"', '\r', '\n']) >= 0)
             throw new UnauthorizedAccessException("Invalid authorized file path.");
         using var staged = new WindowsScopedCodecInput(authorizedPath);
+        // Staging may take seconds or minutes on a conventional HDD. A grant
+        // revoked or expired during copying MUST NOT authorize a new worker.
+        if (!string.Equals(catalog.Resolve(request), authorizedPath, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
         // The copy is destroyed only after LaunchDiagnostic has exited/killed
         // its suspended-start, token-verified, resource-limited child Job.
         return LaunchDiagnostic(workerExecutable,
