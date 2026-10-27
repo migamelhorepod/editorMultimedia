@@ -54,6 +54,10 @@ public sealed class AppContainerRealMetadataTests
                 task, library, resource, grant, MediaAccessOperation.InspectMetadata);
             Assert.Equal(0, WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(
                 worker, catalog, request));
+            long durationTicks = WindowsAppContainerLauncher.ReadAuthorizedMetadataTicks(
+                worker, catalog, request with { RequestId = Guid.NewGuid() });
+            Assert.InRange(durationTicks,
+                TimeSpan.FromSeconds(1.19).Ticks, TimeSpan.FromSeconds(1.21).Ticks);
             Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
             Assert.True(File.Exists(wav));
             Guid readGrant = registry.Issue(task, library, resource,
