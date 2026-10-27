@@ -58,6 +58,39 @@ public sealed class Poc0032LifecycleTests
     }
 
     [Fact]
+    public async Task WindowsJobTerminationClosesActiveWorkerWithinThirtySeconds()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var info = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        info.ArgumentList.Add("-NoProfile");
+        info.ArgumentList.Add("-NonInteractive");
+        info.ArgumentList.Add("-Command");
+        info.ArgumentList.Add("Start-Sleep -Seconds 20");
+        using var worker = System.Diagnostics.Process.Start(info)
+            ?? throw new InvalidOperationException("Cannot launch worker fixture.");
+        try
+        {
+            using var job = WindowsWorkerJob.Attach(worker);
+            var registry = new AccessGrantRegistry(Guid.NewGuid());
+            var supervisor = new WorkerFailureSupervisor(registry,
+                () => { job.Dispose(); return Task.CompletedTask; },
+                () => Task.CompletedTask);
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            await supervisor.HandleFailureAsync(Guid.NewGuid());
+            Assert.True(worker.WaitForExit(5000), "Closing the Job must kill its worker.");
+            Assert.True(started.Elapsed < TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            if (!worker.HasExited) worker.Kill(entireProcessTree: true);
+        }
+    }
+
+    [Fact]
     public async Task FailureRevokesTokenAndCallsShutdown()
     {
         var library = Guid.NewGuid();
