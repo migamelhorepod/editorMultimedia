@@ -144,12 +144,9 @@ public sealed class TimelineSession
                     ? TimelineEngine.DeleteMain(working, working.Version, id)
                     : TimelineEngine.DeleteSecondary(working, working.Version, id);
                 working = result.State;
-                affected.UnionWith(result.AffectedIds);
+                affected.UnionWith(result.ChangedClipIds);
             }
-            if (ids.Length == 0)
-                working = working with { Version = checked(state.Version + 1) };
-            else
-                working = working with { Version = checked(state.Version + 1) };
+            working = working with { Version = checked(state.Version + 1) };
             TimelineEngine.Validate(working);
             return new CommandResult(working, affected.ToArray());
         }, nextMedia);
