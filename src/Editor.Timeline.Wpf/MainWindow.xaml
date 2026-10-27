@@ -9,6 +9,7 @@
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
         <MenuItem Header="Ativar outra biblioteca..." Click="ChangeLibrary_Click"/>
         <MenuItem Header="Desativar biblioteca" Click="DeactivateLibrary_Click"/>
+        <MenuItem Header="Diagnóstico: simular processamento (15 s)" Click="SimulateBusyLibrary_Click"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
         <MenuItem Header="Relocalizar mídia selecionada..." Click="RelinkSelectedMedia_Click"/>
         <Separator/>
