@@ -75,10 +75,12 @@ public sealed class Poc0032LifecycleTests
         present = false;
         Assert.False(monitor.Check());
         Assert.Contains(jobId, terminated);
-        Assert.Equal(0, coordinator.ActiveImports);
+        Assert.Equal(1, coordinator.ActiveImports);
         Assert.Throws<IOException>(() => { coordinator.BeginImport(); });
         present = true;
         Assert.True(monitor.Check());
+        Assert.Throws<IOException>(() => { coordinator.BeginImport(); });
+        coordinator.CompleteImport(jobId); // Confirm technical shutdown before new imports.
         Assert.NotEqual(Guid.Empty, coordinator.BeginImport());
     }
 
