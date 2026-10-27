@@ -145,7 +145,7 @@ jobs:
 
       - name: Publicar relatorios de testes
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: resultados-testes
           if-no-files-found: warn
@@ -165,7 +165,7 @@ jobs:
       - name: Obter codigo
         uses: actions/checkout@v5
       - name: Recuperar evidencias xUnit e WFP
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: resultados-testes
           path: .
@@ -175,7 +175,7 @@ jobs:
           ./tests/security/assert-poc0031-release-gate.ps1 -ResultsRoot "TestResults" -AuditPath "TestResults/sec-006-wfp-audit.json"
       - name: Publicar parecer auditavel
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: poc0031-gate-report
           if-no-files-found: warn
