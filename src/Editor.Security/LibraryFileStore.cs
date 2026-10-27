@@ -22,6 +22,35 @@ public sealed class LibraryFileStore
         root = Path.GetFullPath(libraryRoot);
     }
 
+    /// <summary>
+    /// Startup-only recovery. Call before accepting imports for this library.
+    /// Only our exact GUID-named staging files are eligible. Never traverses
+    /// subdirectories, follows reparse points or touches completed media.
+    /// A locked temporary file fails the recovery instead of allowing a race.
+    /// </summary>
+    public int RecoverInterruptedImports()
+    {
+        AssertAvailableRoot();
+        int discarded = 0;
+        foreach (var candidate in Directory.EnumerateFiles(root,
+                     ".media-import-*.partial", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(candidate);
+            const string prefix = ".media-import-";
+            const string suffix = ".partial";
+            if (!name.StartsWith(prefix, StringComparison.Ordinal) ||
+                !name.EndsWith(suffix, StringComparison.Ordinal) ||
+                !Guid.TryParseExact(name.AsSpan(prefix.Length,
+                    name.Length - prefix.Length - suffix.Length), "N", out _))
+                continue;
+            if ((File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0)
+                throw new UnauthorizedAccessException("Unsafe staging-file link.");
+            File.Delete(candidate);
+            discarded++;
+        }
+        return discarded;
+    }
+
     public async Task<StoredMedia> ImportAsync(string externalFile, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(externalFile);
