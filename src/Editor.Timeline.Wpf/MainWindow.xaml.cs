@@ -292,6 +292,8 @@ public partial class MainWindow : Window
             try
             {
                 var asset = await Task.Run(() => MediaReferences.InspectFile(path));
+                if (libraryStorageMonitor is not null && !libraryStorageMonitor.Check())
+                    throw new IOException("Biblioteca indisponível durante a importação.");
                 if (mediaAssets.Any(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath)))
                 {
                     ignored++;
