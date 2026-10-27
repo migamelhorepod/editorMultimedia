@@ -390,8 +390,8 @@ public partial class MainWindow : Window
     private void UpdateCatalogActions()
     {
         if (InsertMediaButton is null || LocateMediaButton is null ||
-            RelinkMediaButton is null || RemoveMediaButton is null ||
-            RefreshMetadataButton is null || FitSelectedClipButton is null) return;
+            RelinkMediaButton is null || RefreshMetadataButton is null ||
+            FitSelectedClipButton is null) return;
         var item = MediaList?.SelectedItem as MediaListItem;
         var hasSelected = item is not null;
         var uses = item?.Usages ?? 0;
@@ -399,17 +399,6 @@ public partial class MainWindow : Window
         LocateMediaButton.IsEnabled = uses > 0;
         RelinkMediaButton.IsEnabled = hasSelected;
         RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
-        RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
-        RemoveMediaButton.Content = !hasSelected
-            ? "Remover do catálogo"
-            : uses == 0
-                ? "Remover do catálogo (sem clipes)"
-                : $"Em uso: {uses} clipe(s) — não remover do catálogo";
-        RemoveMediaButton.ToolTip = !hasSelected
-            ? "Selecione uma mídia da biblioteca do projeto"
-            : uses == 0
-                ? "Remove a referência da biblioteca"
-                : $"Não é possível remover: {uses} clipe(s) ainda estão em uso na timeline";
         var selectedClip = Selected();
         FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
             mediaAssets.Any(m => m.Id == selectedClip.MediaId);
@@ -481,22 +470,52 @@ public partial class MainWindow : Window
         Viewport.ScrollToVerticalOffset(Math.Max(0, Y(clip.Track) - RulerHeight));
     }
 
-    private void RemoveUnusedMedia_Click(object sender, RoutedEventArgs e)
+    private void MediaList_RightClick(object sender, MouseButtonEventArgs e)
     {
-        var asset = CatalogSelection();
-        if (asset is null) return;
+        if (e.OriginalSource is not DependencyObject origin) return;
+        var container = ItemsControl.ContainerFromElement(MediaList, origin) as ListBoxItem;
+        if (container?.DataContext is not MediaListItem item) return;
+        MediaList.SelectedItem = item;
+        catalogSelectionId = item.Asset.Id;
+        var menu = new ContextMenu
+        {
+            PlacementTarget = container,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint
+        };
+        var delete = new MenuItem { Header = "Excluir" };
+        var mediaId = item.Asset.Id;
+        delete.Click += (_, _) => DeleteCatalogMedia(mediaId);
+        menu.Items.Add(delete);
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void DeleteCatalogMedia(Guid mediaId)
+    {
+        var media = mediaAssets.FirstOrDefault(m => m.Id == mediaId);
+        if (media is null) return;
+        var used = session.Current.Clips.Any(c => c.MediaId == mediaId);
+        if (used)
+        {
+            var choice = MessageBox.Show(this,
+                "Se a mídia for excluída do catálogo, também será removida da timeline, quer mesmo excluir?",
+                "Confirmar exclusão", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (choice != MessageBoxResult.OK) return;
+        }
         try
         {
-            session.RemoveUnusedMedia(asset.Id);
+            session.DeleteCatalogMedia(mediaId);
             mediaAssets = session.Media.ToList();
-            availableMedia.Remove(asset.Id);
-            catalogSelectionId = null;
+            availableMedia.Remove(mediaId);
+            if (catalogSelectionId == mediaId) catalogSelectionId = null;
+            if (selectedId is Guid clipId && session.Current.Clips.All(c => c.Id != clipId))
+                selectedId = null;
             UpdateDirty();
             Draw();
         }
-        catch (MediaReferenceException ex)
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException)
         {
-            MessageBox.Show(this, ex.Message, "Operação não permitida",
+            MessageBox.Show(this, ex.Message, "Não foi possível excluir",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -1500,7 +1519,7 @@ public partial class MainWindow : Window
         var duplicate = MakeClipMenuItem("Duplicar", "copy", Duplicate_Click);
         duplicate.IsEnabled = clip.Track != TimelineEngine.MainTrack;
         menu.Items.Add(duplicate);
-        menu.Items.Add(MakeClipMenuItem("Excluir este clipe da timeline", "trash", Delete_Click));
+        menu.Items.Add(MakeClipMenuItem("Excluir", "trash", Delete_Click));
         var independent = MakeClipMenuItem("Tornar independente", "unlink", Independent_Click);
         independent.IsEnabled = clip.Track != TimelineEngine.MainTrack && clip.Association == AssociationKind.Positioned;
         menu.Items.Add(independent);
