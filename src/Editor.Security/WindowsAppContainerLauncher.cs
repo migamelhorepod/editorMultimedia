@@ -125,6 +125,40 @@ public static class WindowsAppContainerLauncher
     /// A private expendable copy receives only AppContainer read permission;
     /// the original file ACL is never modified.
     /// </summary>
+    /// <summary>
+    /// Return actual, bounded FFprobe duration over a kernel-PID-authenticated
+    /// AppContainer-only named pipe. No controller-side media decoding occurs.
+    /// </summary>
+    public static long ReadAuthorizedMetadataTicks(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.InspectMetadata)
+            throw new UnauthorizedAccessException("Metadata requires InspectMetadata authorization.");
+        string source = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Invalid isolated worker executable.");
+
+        using var staged = new WindowsScopedCodecInput(source);
+        var pipe = new WindowsWorkerMetadataPipe();
+        long ticks = 0;
+        string args = "--process-metadata-report \"" + staged.Path + "\" " +
+            pipe.Name + " " + request.RequestId.ToString("N");
+        int exit = LaunchDiagnostic(workerExecutable, args, true,
+            async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            });
+        if (exit != 0 || ticks <= 0)
+            throw new InvalidDataException("Isolated worker did not return valid metadata.");
+        return ticks;
+    }
+
     public static int RunAuthorizedDecodeProcessing(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
@@ -214,7 +248,11 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-foreign-pipe editor-poc003-", StringComparison.Ordinal) &&
             profileName == WindowsAppContainerPreflight.ProfileName + ".ForeignSecurityTest" && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe)
+        var isMetadataReportProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--process-metadata-report \"", StringComparison.Ordinal) &&
+            authenticatedServer is not null && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -274,7 +312,7 @@ public static class WindowsAppContainerLauncher
                     "Windows refused the AppContainer diagnostic process.");
             // Assign hard resource limits before any code could run.
             resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess,
-                256 * 1024 * 1024, isCodecProbe ? 2u : 1u);
+                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe) ? 2u : 1u);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
