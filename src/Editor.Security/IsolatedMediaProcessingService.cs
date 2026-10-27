@@ -44,7 +44,11 @@ public sealed class IsolatedMediaProcessingService
             return WindowsAppContainerLauncher.ReadAuthorizedMetadataTicks(
                 workerExecutable, catalog, request);
         }
-        finally { grants.RevokeTask(task); }
+        finally
+        {
+            grants.RevokeTask(task);
+            catalog.Unregister(resource);
+        }
     }
 
     public void DecodeToNull(string registeredMediaPath)
@@ -63,7 +67,11 @@ public sealed class IsolatedMediaProcessingService
                 throw new InvalidDataException(
                     "Isolated FFmpeg could not decode this media. Worker status: " + exitCode);
         }
-        finally { grants.RevokeTask(task); }
+        finally
+        {
+            grants.RevokeTask(task);
+            catalog.Unregister(resource);
+        }
     }
 
     public void RevokeAll() => grants.DeactivateLibrary();
