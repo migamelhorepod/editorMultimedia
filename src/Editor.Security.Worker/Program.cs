@@ -70,6 +70,23 @@ if (args.Length == 1 && args[0] == "--probe-external-network")
     }
 }
 
+if (args.Length == 2 && args[0] == "--restricted-pipe")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    try
+    {
+        using var pipeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var reply = await WindowsWorkerPipe.ConnectRestrictedOnceAsync(
+            args[1], WorkerRequest.Heartbeat(), pipeTimeout.Token);
+        return reply.Accepted ? 72 : 0; // Media authorization is forbidden.
+    }
+    catch (Exception ex) when (ex is IOException or InvalidDataException or
+        UnauthorizedAccessException or OperationCanceledException or TimeoutException)
+    {
+        return 73;
+    }
+}
+
 // Existing diagnostic IPC; media stays blocked.
 if (args.Length != 2 || args[0] != "--pipe")
 {
