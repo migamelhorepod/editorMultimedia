@@ -90,6 +90,14 @@ jobs:
           & icacls $bundle /grant "*$($sid):(OI)(CI)RX" /T
           if ($LASTEXITCODE -ne 0) { throw "Failed to authorize AppContainer read/execute." }
 
+      - name: Habilitar auditoria WFP apenas no runner efemero
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true') { throw 'WFP audit policy may only be changed on a disposable GitHub runner.' }
+          auditpol.exe /set /subcategory:"Filtering Platform Connection" /failure:enable
+          if ($LASTEXITCODE -ne 0) { throw "Windows WFP auditing could not be enabled." }
+          auditpol.exe /get /subcategory:"Filtering Platform Connection"
+
       - name: Executar testes unitarios
         run: dotnet test tests/Editor.Timeline.Tests/Editor.Timeline.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=unit.trx" --results-directory TestResults
 
