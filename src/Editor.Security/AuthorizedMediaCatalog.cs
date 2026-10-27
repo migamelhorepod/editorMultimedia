@@ -33,7 +33,7 @@ public sealed class AuthorizedMediaCatalog
 
     public string Resolve(WorkerRequest request)
     {
-        if (request.Operation != MediaAccessOperation.InspectMetadata ||
+        if (request.Operation is not (MediaAccessOperation.InspectMetadata or MediaAccessOperation.ReadChunk) ||
             grants.Authorize(request) != AccessDecision.Allowed)
             throw new UnauthorizedAccessException("Task, library, resource or operation is not authorized.");
         string file;
