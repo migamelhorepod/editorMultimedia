@@ -74,5 +74,9 @@ public sealed class IsolatedMediaProcessingService
         }
     }
 
+    /// <summary>
+    /// Do not expose raw worker paths or user-controlled command lines.
+    /// A closed service permanently rejects new task grants.
+    /// </summary>
     public void RevokeAll() => grants.DeactivateLibrary();
 }
