@@ -1,4 +1,6 @@
 using Editor.Security;
+using System.Net;
+using System.Net.Sockets;
 using Xunit;
 
 namespace Editor.Timeline.Tests;
@@ -55,6 +57,23 @@ public sealed class WindowsAppContainerLauncherTests
         {
             File.Delete(privateFile);
         }
+    }
+
+    [Fact]
+    public void RealWorkerNetworkAttemptMustBeDeniedByWindows()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Missing configuration.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var worker = Path.Combine(root, "src", "Editor.Security.Worker",
+            "bin", configuration, "net10.0", "Editor.Security.Worker.exe");
+        Assert.True(File.Exists(worker));
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        Assert.Equal(0, WindowsAppContainerLauncher.RunDeniedNetworkProbe(worker, port));
     }
 
     [Fact]
