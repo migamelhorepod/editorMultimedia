@@ -129,7 +129,10 @@ if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ff
     {
         using var process = Process.Start(start);
         if (process is null) return 76;
-        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        // A genuine decode may exceed a brief diagnostic timeout on HDD.
+        // The controller Job enforces an outer 5-minute deadline.
+        using var cancel = new CancellationTokenSource(
+            TimeSpan.FromSeconds(args[0].StartsWith("--process-", StringComparison.Ordinal) ? 240 : 4));
         var output = process.StandardOutput.ReadToEndAsync(cancel.Token);
         var error = process.StandardError.ReadToEndAsync(cancel.Token);
         await process.WaitForExitAsync(cancel.Token);
