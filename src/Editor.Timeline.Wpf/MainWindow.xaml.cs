@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Editor.Timeline;
+using Editor.Security;
 
 namespace Editor.Timeline.Wpf;
 
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<MediaAsset> savedMedia = Array.Empty<MediaAsset>();
     private readonly Dictionary<Guid, bool> availableMedia = new();
     private Guid? catalogSelectionId;
+    private readonly MediaImportCoordinator importCoordinator = new(Guid.NewGuid());
 
     // A project catalog entry may have zero, one or many timeline occurrences.
     private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
@@ -267,6 +269,9 @@ public partial class MainWindow : Window
         };
         if (picker.ShowDialog(this) != true) return;
 
+        var importTask = importCoordinator.BeginImport();
+        try
+        {
         var added = 0;
         var ignored = 0;
         var errors = new List<string>();
