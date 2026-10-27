@@ -23,7 +23,7 @@ jobs:
 
             // Comeca em simulacao.
             // Troque para false somente apos conferir o relatorio.
-            const SIMULACAO = true;
+            const SIMULACAO = false;
 
             const prs = await github.paginate(
               github.rest.pulls.list,
