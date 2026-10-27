@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 
 namespace Editor.Security;
 
@@ -149,9 +150,21 @@ public static class WindowsAppContainerLauncher
                         4096, out int capabilityBytes) || capabilityBytes < sizeof(int))
                         throw new Win32Exception(Marshal.GetLastWin32Error(),
                             "Cannot inspect effective AppContainer capabilities.");
-                    if (Marshal.ReadInt32(capabilityBuffer) != 0)
-                        throw new UnauthorizedAccessException(
-                            "Unexpected capability in sandbox token; outbound network disallowed.");
+                    int count = Marshal.ReadInt32(capabilityBuffer);
+                    int offset = IntPtr.Size == 8 ? 8 : 4;
+                    int entryBytes = IntPtr.Size == 8 ? 16 : 8;
+                    if (count < 0 || count > (capabilityBytes - offset) / entryBytes)
+                        throw new InvalidDataException("Malformed Windows token capability list.");
+                    for (int i = 0; i < count; i++)
+                    {
+                        var capabilitySid = Marshal.ReadIntPtr(capabilityBuffer, offset + i * entryBytes);
+                        if (capabilitySid == IntPtr.Zero)
+                            throw new InvalidDataException("Null capability SID.");
+                        var value = new SecurityIdentifier(capabilitySid).Value;
+                        if (value is "S-1-15-3-1" or "S-1-15-3-2" or "S-1-15-3-3")
+                            throw new UnauthorizedAccessException(
+                                "Network capability present in restricted AppContainer token.");
+                    }
                 }
                 finally
                 {
