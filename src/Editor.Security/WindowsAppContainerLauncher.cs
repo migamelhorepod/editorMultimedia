@@ -90,6 +90,30 @@ public static class WindowsAppContainerLauncher
         return (exitCode, pid);
     }
 
+    /// <summary>
+    /// Launch real ffprobe inside the verified AppContainer for one registered
+    /// library resource and InspectMetadata grant. The kernel must separately
+    /// permit read access to that one file; this API never changes file ACLs
+    /// and never runs ffprobe outside the sandbox on access failure.
+    /// Exit 0 proves a bounded metadata probe completed, not authorization
+    /// for unrestricted media processing.
+    /// </summary>
+    public static int RunAuthorizedMetadataProcessing(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        string authorizedPath = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
+        if (authorizedPath.IndexOfAny(['"', '\r', '\n']) >= 0)
+            throw new UnauthorizedAccessException("Invalid authorized file path.");
+        return LaunchDiagnostic(workerExecutable,
+            "--process-metadata \"" + authorizedPath + "\"", true);
+    }
+
     public static int RunAuthorizedCodecIsolationProbe(
         string workerExecutable, AuthorizedMediaCatalog catalog,
         WorkerRequest request, bool useFfmpeg)
@@ -154,7 +178,8 @@ public static class WindowsAppContainerLauncher
         var isCodecProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             (arguments.StartsWith("--probe-ffprobe " + ((char)34), StringComparison.Ordinal) ||
-             arguments.StartsWith("--probe-ffmpeg " + ((char)34), StringComparison.Ordinal)) &&
+             arguments.StartsWith("--probe-ffmpeg " + ((char)34), StringComparison.Ordinal) ||
+             arguments.StartsWith("--process-metadata " + ((char)34), StringComparison.Ordinal)) &&
             arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
         var isForeignProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
