@@ -121,7 +121,7 @@ public partial class MainWindow : Window
 
     private void UpdateWindowTitle()
     {
-        Title = $"Editor Multimídia — {projectName}{(hasUnsavedChanges ? " *" : "")} — POC-001";
+        Title = $"Editor Multimídia — {projectName}{(hasUnsavedChanges ? " *" : "")} — POC-003.2 (TM-06 corrigido)";
     }
 
     private void UpdateDirty()
