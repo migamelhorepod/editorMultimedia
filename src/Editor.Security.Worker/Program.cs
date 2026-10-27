@@ -105,7 +105,7 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
         RedirectStandardOutput = true,
         RedirectStandardError = true
     };
-    start.ArgumentList.Add("-nostdin");
+    if (tool == "ffmpeg.exe") start.ArgumentList.Add("-nostdin");
     start.ArgumentList.Add("-v");
     start.ArgumentList.Add("error");
     start.ArgumentList.Add("-i");
