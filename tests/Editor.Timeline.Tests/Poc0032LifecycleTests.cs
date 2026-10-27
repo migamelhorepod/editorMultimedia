@@ -113,8 +113,7 @@ public sealed class Poc0032LifecycleTests
         info.ArgumentList.Add("-NoProfile");
         info.ArgumentList.Add("-NonInteractive");
         info.ArgumentList.Add("-Command");
-        info.ArgumentList.Add("[IO.File]::AppendAllText($args[0], 'interrupted'); Start-Sleep -Seconds 20");
-        info.ArgumentList.Add(partial);
+        info.ArgumentList.Add("[IO.File]::AppendAllText('" + partial.Replace("'", "''") + "', 'interrupted'); Start-Sleep -Seconds 20");
         using var child = System.Diagnostics.Process.Start(info)
             ?? throw new InvalidOperationException("Cannot start crash fixture.");
         try
