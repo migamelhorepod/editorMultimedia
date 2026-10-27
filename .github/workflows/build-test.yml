@@ -66,7 +66,14 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json"
+          $probe = "TestResults/sec-006-probe.txt"
+          if (Test-Path $probe) {
+            $lines = @(Get-Content $probe)
+            if ($lines.Count -ne 3) { throw "Malformed SEC-006 probe timing fixture." }
+            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json" -WorkerPath $lines[0] -ProbeStartUtc $lines[1] -ProbeEndUtc $lines[2]
+          } else {
+            ./tests/security/collect-sec006-wfp.ps1 -OutputPath "TestResults/sec-006-wfp-audit.json"
+          }
 
       - name: Preparar Node.js 24 LTS
         uses: actions/setup-node@v5
