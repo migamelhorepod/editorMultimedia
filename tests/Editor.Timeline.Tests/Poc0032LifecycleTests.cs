@@ -5,6 +5,11 @@ namespace Editor.Timeline.Tests;
 
 public sealed class Poc0032LifecycleTests
 {
+    private sealed class SpyJob(Action terminate) : IDisposable
+    {
+        public void Dispose() => terminate();
+    }
+
     [Fact]
     public void ImportHasNoCancelAndLibrarySwitchIsBlockedWhileBusy()
     {
@@ -95,8 +100,7 @@ public sealed class Poc0032LifecycleTests
         {
             using var job = WindowsWorkerJob.Attach(worker);
             var registry = new AccessGrantRegistry(Guid.NewGuid());
-            var supervisor = new WorkerFailureSupervisor(registry,
-                () => { job.Dispose(); return Task.CompletedTask; },
+            var supervisor = new WorkerFailureSupervisor(registry, job,
                 () => Task.CompletedTask);
             var started = System.Diagnostics.Stopwatch.StartNew();
             await supervisor.HandleFailureAsync(Guid.NewGuid());
@@ -121,7 +125,7 @@ public sealed class Poc0032LifecycleTests
             task, library, media, grant, MediaAccessOperation.ReadChunk);
         bool terminated = false, exited = false;
         var supervisor = new WorkerFailureSupervisor(grants,
-            () => { terminated = true; return Task.CompletedTask; },
+            new SpyJob(() => terminated = true),
             () => { exited = true; return Task.CompletedTask; });
         Assert.Equal("Ocorreu uma falha e o aplicativo precisará ser finalizado",
             await supervisor.HandleFailureAsync(task));
