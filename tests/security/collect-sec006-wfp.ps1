@@ -14,6 +14,10 @@ $policyExit = $LASTEXITCODE
 $events = @()
 $errorText = $null
 $matches = @()
+$samePid = 0
+$sameDestination = 0
+$sameApplication = 0
+$blockedEventCount = 0
 $start = if ($ProbeStartUtc) { ([datetime]::Parse($ProbeStartUtc)).ToUniversalTime().AddSeconds(-3) } else { (Get-Date).ToUniversalTime().AddMinutes(-15) }
 $end = if ($ProbeEndUtc) { ([datetime]::Parse($ProbeEndUtc)).ToUniversalTime().AddSeconds(3) } else { (Get-Date).ToUniversalTime() }
 try {
@@ -29,6 +33,12 @@ try {
         if (-not $destination) { $destination = $fields['DestinationAddress'] }
         if (-not $port) { $port = $fields['DestinationPort'] }
         $workerMatches = $WorkerPath -and $pathValue -and ([string]::Equals($pathValue, $WorkerPath, [StringComparison]::OrdinalIgnoreCase))
+        if ($event.Id -eq 5157) {
+            $blockedEventCount++
+            if ($fields['ProcessID'] -eq "$WorkerProcessId") { $samePid++ }
+            if ($destination -eq $DestinationAddress -and $port -eq "$DestinationPort") { $sameDestination++ }
+            if ($workerMatches) { $sameApplication++ }
+        }
         if ($event.Id -eq 5157 -and $workerMatches -and $WorkerProcessId -gt 0 -and
             $fields['ProcessID'] -eq "$WorkerProcessId" -and
             $destination -eq $DestinationAddress -and $port -eq "$DestinationPort") {
@@ -50,6 +60,10 @@ $report = [ordered]@{
     workerPath = $WorkerPath
     workerProcessId = $WorkerProcessId
     eventCount = @($events).Count
+    blockedEventCount = $blockedEventCount
+    samePidDeniedCount = $samePid
+    sameDestinationDeniedCount = $sameDestination
+    sameApplicationDeniedCount = $sameApplication
     eventReadError = $errorText
     correlatedDeniedEvents = @($matches)
     policyProvenForWorker = (@($matches).Count -gt 0)
@@ -59,3 +73,4 @@ $directory = Split-Path -Parent $OutputPath
 if ($directory) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
 $report | ConvertTo-Json -Depth 7 | Set-Content -Path $OutputPath -Encoding UTF8
 Write-Host $report.reason
+Write-Host "WFP diagnostics: total $($report.eventCount), 5157 $blockedEventCount, PID $samePid, destination $sameDestination, application $sameApplication."
