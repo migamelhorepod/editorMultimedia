@@ -370,7 +370,12 @@ public static class WindowsAppContainerLauncher
             Task<WorkerResponse>? serverTask = authenticatedServer?.Invoke(checked((int)process.dwProcessId));
             if (ResumeThread(process.hThread) == uint.MaxValue)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume restricted process.");
-            uint wait = WaitForSingleObject(process.hProcess, 5000);
+            // Keep the 5s deadline for diagnostic probes. Real FFmpeg decode on
+            // a conventional HDD needs a larger but still bounded deadline.
+            // Timeout remains fail-closed: the Job is killed in finally.
+            bool realMediaCommand = arguments.StartsWith("--process-", StringComparison.Ordinal);
+            uint wait = WaitForSingleObject(process.hProcess,
+                realMediaCommand ? 300000u : 5000u);
             if (wait != 0)
                 throw new InvalidOperationException("Restricted diagnostic failed to exit in time.");
             if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
