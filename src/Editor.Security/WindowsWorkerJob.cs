@@ -25,6 +25,23 @@ public sealed class WindowsWorkerJob : IDisposable
         if (memoryLimitBytes < 32 * 1024 * 1024)
             throw new ArgumentOutOfRangeException(nameof(memoryLimitBytes));
 
+        return AttachProcessHandle(child.Handle, memoryLimitBytes);
+    }
+
+    /// <summary>
+    /// Attach a process while its primary thread is still suspended.
+    /// The caller must guarantee it has not been resumed and must terminate
+    /// it on failure. This does not itself provide a sandbox.
+    /// </summary>
+    internal static WindowsWorkerJob AttachProcessHandle(IntPtr processHandle,
+        nuint memoryLimitBytes = 256 * 1024 * 1024)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException();
+        if (processHandle == IntPtr.Zero || processHandle == new IntPtr(-1))
+            throw new ArgumentException("Invalid process handle.", nameof(processHandle));
+        if (memoryLimitBytes < 32 * 1024 * 1024)
+            throw new ArgumentOutOfRangeException(nameof(memoryLimitBytes));
         SafeJobHandle job = CreateJobObjectW(IntPtr.Zero, null);
         if (job.IsInvalid)
         {
@@ -60,7 +77,7 @@ public sealed class WindowsWorkerJob : IDisposable
                 Marshal.FreeHGlobal(buffer);
             }
 
-            if (child.HasExited || !AssignProcessToJobObject(job, child.Handle))
+            if (!AssignProcessToJobObject(job, processHandle))
                 throw new InvalidOperationException(
                     "Worker exited or could not be assigned to a restricted job.");
             return new WindowsWorkerJob(job);
