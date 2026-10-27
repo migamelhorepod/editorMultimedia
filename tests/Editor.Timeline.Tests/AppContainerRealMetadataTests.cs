@@ -56,7 +56,20 @@ public sealed class AppContainerRealMetadataTests
                 worker, catalog, request));
             Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
             Assert.True(File.Exists(wav));
+            Guid readGrant = registry.Issue(task, library, resource,
+                MediaAccessOperation.ReadChunk, TimeSpan.FromMinutes(1));
+            var decodingRequest = request with
+            {
+                RequestId = Guid.NewGuid(),
+                GrantId = readGrant,
+                Operation = MediaAccessOperation.ReadChunk
+            };
+            Assert.Equal(0, WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(
+                worker, catalog, decodingRequest));
+            Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
             registry.RevokeTask(task);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(worker, catalog, decodingRequest));
             Assert.Throws<UnauthorizedAccessException>(() =>
                 WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(worker, catalog, request));
         }
