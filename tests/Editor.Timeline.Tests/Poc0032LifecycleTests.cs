@@ -58,6 +58,25 @@ public sealed class Poc0032LifecycleTests
     }
 
     [Fact]
+    public void StartupRecoveryRejectsCorruptedCompletedOutput()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "poc0032-integrity-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var recovery = new MediaResultRecovery(folder);
+            Guid id = Guid.NewGuid();
+            File.WriteAllText(recovery.Begin(id), "correct");
+            string finished = recovery.Commit(id);
+            File.WriteAllText(finished, "corrupted");
+            var result = recovery.Recover();
+            Assert.Equal(1, result.IncompleteDiscarded);
+            Assert.Equal(0, result.CompletedPreserved);
+            Assert.False(File.Exists(finished));
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
+    [Fact]
     public async Task WindowsJobTerminationClosesActiveWorkerWithinThirtySeconds()
     {
         if (!OperatingSystem.IsWindows()) return;
