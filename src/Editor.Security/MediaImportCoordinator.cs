@@ -55,8 +55,12 @@ public sealed class MediaImportCoordinator
         lock (gate)
         {
             if (active.Count != 0) return new(false, BusyMessage);
-            if (unavailable) return new(false, BusyMessage);
+            // Storage loss must not prevent selecting a different library
+            // once all affected workers have finished terminating.
             library = nextLibrary ?? Guid.Empty;
+            unavailable = false;
+            physicalPresent = true;
+            drainingAfterFailure.Clear();
             return new(true, null);
         }
     }
