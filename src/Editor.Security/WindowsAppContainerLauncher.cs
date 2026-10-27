@@ -152,7 +152,7 @@ public static class WindowsAppContainerLauncher
                 throw new InvalidOperationException("Restricted diagnostic failed to exit in time.");
             if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
-            return checked((int)exitCode);
+            return ConvertNativeExitCode(exitCode);
         }
         finally
         {
@@ -169,6 +169,8 @@ public static class WindowsAppContainerLauncher
             if (sid != IntPtr.Zero) FreeSid(sid);
         }
     }
+
+    private static int ConvertNativeExitCode(uint nativeCode) => unchecked((int)nativeCode);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SECURITY_CAPABILITIES
