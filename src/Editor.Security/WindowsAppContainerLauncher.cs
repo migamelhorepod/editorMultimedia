@@ -46,6 +46,16 @@ public static class WindowsAppContainerLauncher
             "--probe-denied-file \\"" + protectedFile + "\\"", true);
     }
 
+    public static int RunDeniedNetworkProbe(string workerExecutable, int port)
+    {
+        if (port is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(port));
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
+            StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the real diagnostic worker is permitted.");
+        return LaunchDiagnostic(workerExecutable, "--probe-denied-network " + port, true);
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run)
     {
         if (!OperatingSystem.IsWindows())
@@ -62,7 +72,10 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-denied-file \\"", StringComparison.Ordinal) &&
             arguments.EndsWith("\\"", StringComparison.Ordinal) && run;
-        if (!isInertCommand && !isWorkerProbe)
+        var isNetworkProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--probe-denied-network ", StringComparison.Ordinal) && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
