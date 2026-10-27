@@ -30,5 +30,30 @@ foreach ($tool in @($ffmpeg.Source, $ffprobe.Source)) {
 
 Copy-Item $ffmpeg.Source (Join-Path $bundle "ffmpeg.exe") -Force
 Copy-Item $ffprobe.Source (Join-Path $bundle "ffprobe.exe") -Force
+# Windows must authorize the exact AppContainer package identity to read and
+# execute this bundle. Never grant Everyone, Users or all AppContainers.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class WorkerBundleSid {
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
+    private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr FreeSid(IntPtr sid);
+    public static string Get() {
+        IntPtr nativeSid;
+        int hr = DeriveAppContainerSidFromAppContainerName(
+            "MigaMelhore.EditorMultimedia.MediaWorker", out nativeSid);
+        if (hr < 0 || nativeSid == IntPtr.Zero) Marshal.ThrowExceptionForHR(hr);
+        try { return new SecurityIdentifier(nativeSid).Value; }
+        finally { FreeSid(nativeSid); }
+    }
+}
+'@
+$sid = [WorkerBundleSid]::Get()
+& icacls.exe $bundle /grant ("*" + $sid + ":(OI)(CI)RX") /T /C
+if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar acesso mínimo ao bundle AppContainer." }
+
 Write-Host "Bundle AppContainer preparado: $bundle"
 Write-Host "Worker, ffmpeg e ffprobe prontos. O worker continua protegido pelo token AppContainer e Job Object."
