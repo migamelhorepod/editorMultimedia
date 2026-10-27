@@ -75,6 +75,30 @@ public sealed class LibraryFileStoreBddTests
     }
 
     [Fact]
+    public void GivenAbortedImport_WhenLibraryReopens_ThenOnlyIncompleteStagingIsRemoved()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "editor-recovery-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string interrupted = Path.Combine(root, ".media-import-" + Guid.NewGuid().ToString("N") + ".partial");
+            string original = Path.Combine(root, "original.wav");
+            string unrelated = Path.Combine(root, ".media-import-not-a-guid.partial");
+            File.WriteAllBytes(interrupted, [5, 6, 7]);
+            File.WriteAllBytes(original, [1, 2, 3]);
+            File.WriteAllBytes(unrelated, [9]);
+            var store = new LibraryFileStore(root);
+            Assert.Equal(1, store.RecoverInterruptedImports());
+            Assert.False(File.Exists(interrupted));
+            Assert.True(File.Exists(original));
+            Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(original));
+            Assert.True(File.Exists(unrelated));
+            Assert.Equal(0, store.RecoverInterruptedImports());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task GivenStorageMissing_WhenImportRequested_ThenRejectWithoutTouchingSource()
     {
         string home = Path.Combine(Path.GetTempPath(), "editor-lib-" + Guid.NewGuid().ToString("N"));
