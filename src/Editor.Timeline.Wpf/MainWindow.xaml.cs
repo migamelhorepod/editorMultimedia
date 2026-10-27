@@ -633,13 +633,19 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FitSelectedClip_Click(object sender, RoutedEventArgs e)
+    private async void FitSelectedClip_Click(object sender, RoutedEventArgs e)
     {
         var clip = Selected();
         if (clip is null) return;
+        Guid? operation = null;
         try
         {
-            session.FitClipToSource(clip.Id);
+            var asset = mediaAssets.FirstOrDefault(m => m.Id == clip.MediaId)
+                ?? throw new MediaReferenceException("Mídia não vinculada ao catálogo.");
+            operation = importCoordinator.BeginImport();
+            ImportStatus.Text = "Aferindo duração real no worker AppContainer...";
+            var inspected = await InspectLibraryAssetInSandboxAsync(asset.SourcePath);
+            session.FitClipToMeasuredSource(clip.Id, inspected);
             mediaAssets = session.Media.ToList();
             RefreshMediaPresence();
             UpdateDirty();
@@ -647,11 +653,15 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
             IOException or UnauthorizedAccessException or ArgumentException or
-            NotSupportedException or OverflowException)
+            NotSupportedException or OverflowException or Win32Exception or
+            System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
-            // Context-menu timeline actions do not interrupt the editor with
-            // dialogs. Failure is atomic; keep the source and current edits.
-            System.Diagnostics.Debug.WriteLine($"Restaurar duração original: {ex}");
+            System.Diagnostics.Debug.WriteLine($"Restaurar duração original via worker: {ex}");
+        }
+        finally
+        {
+            if (operation is Guid task) importCoordinator.CompleteImport(task);
+            ImportStatus.Text = "";
         }
     }
 
