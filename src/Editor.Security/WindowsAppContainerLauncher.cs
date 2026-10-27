@@ -213,7 +213,8 @@ public static class WindowsAppContainerLauncher
             if (serverTask is not null)
             {
                 var response = serverTask.GetAwaiter().GetResult();
-                if (response.Accepted) throw new UnauthorizedAccessException("IPC unlocked media processing.");
+                if (MediaWorkerAdmission.IsMediaProcessingAvailable)
+                    throw new UnauthorizedAccessException("Media processing must remain unavailable.");
             }
             return ConvertNativeExitCode(exitCode);
         }
