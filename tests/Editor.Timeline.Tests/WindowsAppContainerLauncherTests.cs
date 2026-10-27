@@ -15,7 +15,7 @@ public sealed class WindowsAppContainerLauncherTests
     }
 
     [Fact]
-    public void LauncherCreatesOnlySuspendedDiagnosticAndClosesIt()
+    public void LauncherVerifiesKernelAppContainerTokenBeforeReturning()
     {
         if (!OperatingSystem.IsWindows()) return;
         var executable = Path.Combine(Environment.SystemDirectory, "cmd.exe");
