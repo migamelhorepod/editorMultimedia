@@ -142,7 +142,7 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
                 !double.TryParse(durationLine.Trim()["duration=".Length..],
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
-                (!double.IsFinite(duration) || (args[0] == "--process-metadata" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11))
+                (!double.IsFinite(duration) || (args[0] == "--process-metadata" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)))
                 return 79; // ffprobe must decode metadata of the granted 0.10 s WAV.
         }
         return 0;
