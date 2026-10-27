@@ -16,14 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verificar branches antigas
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { owner, repo } = context.repo;
 
             // Comeca em simulacao.
             // Troque para false somente apos conferir o relatorio.
-            const SIMULACAO = false;
+            const SIMULACAO = true;
 
             const prs = await github.paginate(
               github.rest.pulls.list,
@@ -45,33 +45,27 @@ jobs:
               branches.map(b => b.name)
             );
 
-            const integrados = prs
-              .filter(pr =>
-                pr.merged_at &&
-                pr.base.ref === 'main' &&
-                pr.head.repo?.full_name ===
-                  `${owner}/${repo}`
-              )
-              .sort((a, b) =>
-                new Date(b.merged_at) -
-                new Date(a.merged_at)
-              );
+            
+const integrados = prs
+  .filter(pr =>
+    pr.merged_at &&
+    pr.base.ref === 'main' &&
+    pr.head.repo?.full_name === `${owner}/${repo}`
+  )
+  .sort((a, b) =>
+    new Date(b.merged_at) - new Date(a.merged_at)
+  );
 
-            const protegidas = new Set(['main']);
+// Preserve as duas ultimas integracoes reais,
+// mesmo se a branch correspondente ja foi apagada.
+const ultimasDuas = integrados.slice(0, 2);
 
-            // Preserva as duas ultimas branches
-            // integradas que ainda existem.
-            let preservadas = 0;
-            for (const pr of integrados) {
-              if (
-                existentes.has(pr.head.ref) &&
-                !protegidas.has(pr.head.ref)
-              ) {
-                protegidas.add(pr.head.ref);
-                preservadas++;
-                if (preservadas === 2) break;
-              }
-            }
+const protegidas = new Set(['main']);
+
+for (const pr of ultimasDuas) {
+  protegidas.add(pr.head.ref);
+}
+
 
             // Preserva todas as branches com PR aberto.
             for (const pr of prs.filter(
