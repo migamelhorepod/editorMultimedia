@@ -186,6 +186,38 @@ public static class WindowsAppContainerLauncher
             "--process-decode \"" + staged.Path + "\"", true);
     }
 
+    /// <summary>
+    /// Security regression only: start a real FFmpeg child in a verified
+    /// AppContainer, authenticate its readiness by kernel PID, then forcibly
+    /// close its restricted Job. Never returns decoded user data.
+    /// </summary>
+    public static int RunAuthorizedInterruptedDecodeProbe(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.ReadChunk)
+            throw new UnauthorizedAccessException("An interrupted decoder requires ReadChunk authorization.");
+        string source = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+                "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the dedicated worker is allowed.");
+        using var staged = new WindowsScopedCodecInput(source);
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media grant changed during staging.");
+        var pipe = new WindowsWorkerMetadataPipe();
+        string args = "--probe-held-decode \"" + staged.Path + "\" " +
+            pipe.Name + " " + request.RequestId.ToString("N");
+        return LaunchDiagnostic(workerExecutable, args, true,
+            async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                _ = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            }, terminateAfterHandshake: true);
+    }
+
     public static int RunAuthorizedCodecIsolationProbe(
         string workerExecutable, AuthorizedMediaCatalog catalog,
         WorkerRequest request, bool useFfmpeg)
@@ -221,7 +253,8 @@ public static class WindowsAppContainerLauncher
 
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
-        Action<int>? processVerified = null, string? profileName = null)
+        Action<int>? processVerified = null, string? profileName = null,
+        bool terminateAfterHandshake = false)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -262,7 +295,11 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--process-metadata-report \"", StringComparison.Ordinal) &&
             authenticatedServer is not null && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe)
+        var isHeldDecoderProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--probe-held-decode \"", StringComparison.Ordinal) &&
+            authenticatedServer is not null && terminateAfterHandshake && run;
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe && !isHeldDecoderProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -322,7 +359,7 @@ public static class WindowsAppContainerLauncher
                     "Windows refused the AppContainer diagnostic process.");
             // Assign hard resource limits before any code could run.
             resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess,
-                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe) ? 2u : 1u);
+                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe || isHeldDecoderProbe) ? 2u : 1u);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
@@ -394,6 +431,17 @@ public static class WindowsAppContainerLauncher
                 elapsedMs += 100u;
                 if (serverTask is { IsFaulted: true } or { IsCanceled: true })
                     serverTask.GetAwaiter().GetResult();
+                if (terminateAfterHandshake && serverTask is { IsCompletedSuccessfully: true })
+                {
+                    // The authenticated worker reported that real FFmpeg is
+                    // running. Closing the Job must kill BOTH OS processes.
+                    _ = serverTask.GetAwaiter().GetResult();
+                    resourceJob.Dispose();
+                    resourceJob = null;
+                    if (WaitForSingleObject(process.hProcess, 5000u) != 0u)
+                        throw new TimeoutException("Forced AppContainer worker termination failed.");
+                    return 0; // Explicit successful kill proof, not codec success.
+                }
             } while (elapsedMs < maxWaitMs);
             if (wait != 0u)
                 throw new TimeoutException("Restricted worker did not exit within its bounded deadline.");
