@@ -22,7 +22,7 @@ public sealed class AppContainerSeekableFdTests
             WriteWav(original);
             RunCase(root, original, TimeSpan.FromSeconds(1.2));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally { RemoveFolderEventually(root); }
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class AppContainerSeekableFdTests
                 "Fixture must require seek to read moov after mdat.");
             RunCase(root, original, TimeSpan.FromSeconds(1));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally { RemoveFolderEventually(root); }
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class AppContainerSeekableFdTests
                     GetWorker(), catalog, request));
             Assert.Empty(Directory.GetFiles(root, ".editorworker-*"));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally { RemoveFolderEventually(root); }
     }
 
     private static void RunCase(string root, string original, TimeSpan duration)
@@ -159,6 +159,21 @@ public sealed class AppContainerSeekableFdTests
         for (int i = 0; i <= bytes.Length - marker.Length; ++i)
             if (bytes.AsSpan(i, marker.Length).SequenceEqual(marker)) return i;
         return -1;
+    }
+
+    private static void RemoveFolderEventually(string folder)
+    {
+        // Job termination is synchronous but the Windows kernel may still be
+        // releasing inherited input HANDLEs. Avoid masking the real test
+        // failure with a transient cleanup sharing violation.
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try { Directory.Delete(folder, recursive: true); return; }
+            catch (IOException) when (attempt < 19)
+            {
+                Thread.Sleep(200);
+            }
+        }
     }
 
     private static void WriteWav(string path)
