@@ -1,3 +1,4 @@
+using Editor.Security.Worker;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Diagnostics;
@@ -98,30 +99,13 @@ if (args.Length == 3 && args[0] == "--probe-fd-metadata")
         requestId == Guid.Empty) return 71;
     string ffprobe = Path.Combine(AppContext.BaseDirectory, "ffprobe.exe");
     if (!File.Exists(ffprobe)) return 75;
-    var command = new ProcessStartInfo(ffprobe)
-    {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        RedirectStandardInput = false // keep the seekable Win32 file handle
-    };
-    foreach (string arg in new[] {
-        "-v", "error", "-protocol_whitelist", "fd",
-        "-i", "fd:", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1" })
-        command.ArgumentList.Add(arg);
     try
     {
-        using var toolProcess = Process.Start(command);
-        if (toolProcess is null) return 76;
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var standardOutput = toolProcess.StandardOutput.ReadToEndAsync(deadline.Token);
-        var standardError = toolProcess.StandardError.ReadToEndAsync(deadline.Token);
-        await toolProcess.WaitForExitAsync(deadline.Token);
-        string output = await standardOutput;
-        _ = await standardError;
-        if (toolProcess.ExitCode != 0) return 77;
+        using var probeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var (exitCode, output) =
+            await WindowsInheritedHandleFfprobe.ReadDurationAsync(
+                ffprobe, probeDeadline.Token);
+        if (exitCode != 0) return 77;
         string? durationLine = output.Split('\n').FirstOrDefault(
             s => s.Trim().StartsWith("duration=", StringComparison.Ordinal));
         if (durationLine is null ||
@@ -139,7 +123,7 @@ if (args.Length == 3 && args[0] == "--probe-fd-metadata")
     }
     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
         System.ComponentModel.Win32Exception or OperationCanceledException or
-        InvalidDataException or OverflowException)
+        InvalidDataException or OverflowException or TimeoutException)
     {
         return 78;
     }
