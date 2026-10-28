@@ -274,6 +274,7 @@ public static class WindowsAppContainerLauncher
         // Compare the kernel-resolved path of the OPEN HANDLE to the approved
         // path, not merely the same string re-resolved by the catalog.
         VerifyOpenedInputPath(input.SafeFileHandle.DangerousGetHandle(), source);
+        catalog.ValidateOpenedHandle(request, input.SafeFileHandle);
         if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Media grant changed before probe.");
         var pipe = new WindowsWorkerMetadataPipe();
