@@ -251,10 +251,47 @@ public static class WindowsAppContainerLauncher
             true, profileName: WindowsAppContainerPreflight.ProfileName + ".ForeignSecurityTest");
     }
 
+    /// <summary>
+    /// Experimental only: FFprobe receives one controller-opened media HANDLE,
+    /// not the path or an ACL grant. Production processing remains blocked.
+    /// </summary>
+    public static long ProbeAuthorizedSeekableMetadataTicks(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.InspectMetadata)
+            throw new UnauthorizedAccessException("Metadata authorization required.");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
+                StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Unexpected worker executable.");
+        string source = catalog.Resolve(request);
+        using var input = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 4096, FileOptions.RandomAccess);
+        if (input.Length is <= 0 or > (10L * 1024 * 1024 * 1024))
+            throw new IOException("Invalid authorized media input length.");
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media grant changed before probe.");
+        var pipe = new WindowsWorkerMetadataPipe();
+        long ticks = 0;
+        int exit = LaunchDiagnostic(workerExecutable,
+            "--probe-fd-metadata " + pipe.Name + " " + request.RequestId.ToString("N"),
+            true, async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            }, inheritedMediaInput: input.SafeFileHandle.DangerousGetHandle());
+        if (exit != 0 || ticks <= 0)
+            throw new InvalidDataException("Seekable AppContainer metadata probe failed.");
+        return ticks;
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
         Action<int>? processVerified = null, string? profileName = null,
-        bool terminateAfterHandshake = false)
+        bool terminateAfterHandshake = false, IntPtr inheritedMediaInput = default)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -287,6 +324,10 @@ public static class WindowsAppContainerLauncher
              arguments.StartsWith("--process-metadata " + ((char)34), StringComparison.Ordinal) ||
              arguments.StartsWith("--process-decode " + ((char)34), StringComparison.Ordinal)) &&
             arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
+        var isFdProbe = string.Equals(Path.GetFileName(executable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.StartsWith("--probe-fd-metadata editor-poc003-", StringComparison.Ordinal) &&
+            inheritedMediaInput != IntPtr.Zero && authenticatedServer is not null && run;
         var isForeignProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-foreign-pipe editor-poc003-", StringComparison.Ordinal) &&
@@ -299,7 +340,7 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-held-decode \"", StringComparison.Ordinal) &&
             authenticatedServer is not null && terminateAfterHandshake && run;
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe && !isHeldDecoderProbe)
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe && !isHeldDecoderProbe && !isFdProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -312,6 +353,8 @@ public static class WindowsAppContainerLauncher
         PROCESS_INFORMATION process = default;
         WindowsWorkerJob? resourceJob = null;
         bool initialized = false;
+        IntPtr inheritedInput = IntPtr.Zero, inheritedNull = IntPtr.Zero;
+        IntPtr nullSource = IntPtr.Zero, handleListBuffer = IntPtr.Zero;
         try
         {
             int hr;
@@ -332,11 +375,12 @@ public static class WindowsAppContainerLauncher
                     hr < 0 ? hr : unchecked((int)0x80004005));
 
             nuint bytes = 0;
-            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
+            int attributeCount = inheritedMediaInput == IntPtr.Zero ? 1 : 2;
+            InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref bytes);
             if (bytes == 0)
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             attributes = Marshal.AllocHGlobal(checked((nint)bytes));
-            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref bytes))
+            if (!InitializeProcThreadAttributeList(attributes, attributeCount, 0, ref bytes))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             initialized = true;
 
@@ -351,15 +395,48 @@ public static class WindowsAppContainerLauncher
             var startup = new STARTUPINFOEX();
             startup.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
             startup.lpAttributeList = attributes;
+            if (inheritedMediaInput != IntPtr.Zero)
+            {
+                // A private inheritable duplicate is whitelisted; never make
+                // the original FileStream HANDLE inheritable.
+                if (!DuplicateHandle(GetCurrentProcess(), inheritedMediaInput,
+                        GetCurrentProcess(), out inheritedInput, 0, true, 2))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Cannot duplicate media read HANDLE.");
+                nullSource = CreateFileW("NUL", 0x40000000, 3,
+                    IntPtr.Zero, 3, 0, IntPtr.Zero);
+                if (nullSource == new IntPtr(-1))
+                {
+                    nullSource = IntPtr.Zero;
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Cannot open inert standard output.");
+                }
+                if (!DuplicateHandle(GetCurrentProcess(), nullSource,
+                        GetCurrentProcess(), out inheritedNull, 0, true, 2))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Cannot duplicate inert output HANDLE.");
+                handleListBuffer = Marshal.AllocHGlobal(IntPtr.Size * 2);
+                Marshal.WriteIntPtr(handleListBuffer, 0, inheritedInput);
+                Marshal.WriteIntPtr(handleListBuffer, IntPtr.Size, inheritedNull);
+                if (!UpdateProcThreadAttribute(attributes, 0, (nuint)0x00020002,
+                        handleListBuffer, (nuint)(2 * IntPtr.Size),
+                        IntPtr.Zero, IntPtr.Zero))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Cannot whitelist media HANDLE inheritance.");
+                startup.StartupInfo.dwFlags |= 0x00000100;
+                startup.StartupInfo.hStdInput = inheritedInput;
+                startup.StartupInfo.hStdOutput = inheritedNull;
+                startup.StartupInfo.hStdError = inheritedNull;
+            }
             string commandLine = "\"" + executable + "\" " + arguments;
             if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero,
-                false, ExtendedStartupInfoPresent | CreateSuspended,
+                inheritedMediaInput != IntPtr.Zero, ExtendedStartupInfoPresent | CreateSuspended,
                 IntPtr.Zero, Environment.SystemDirectory, ref startup, out process))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     "Windows refused the AppContainer diagnostic process.");
             // Assign hard resource limits before any code could run.
             resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess,
-                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe || isHeldDecoderProbe) ? 2u : 1u);
+                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe || isHeldDecoderProbe || isFdProbe) ? 2u : 1u);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
@@ -414,7 +491,7 @@ public static class WindowsAppContainerLauncher
             // Keep the 5s deadline for diagnostic probes. Real FFmpeg decode on
             // a conventional HDD needs a larger but still bounded deadline.
             // Timeout remains fail-closed: the Job is killed in finally.
-            bool realMediaCommand = arguments.StartsWith("--process-", StringComparison.Ordinal);
+            bool realMediaCommand = arguments.StartsWith("--process-", StringComparison.Ordinal) || isFdProbe;
             // A worker can fail before opening the controller-owned pipe (for
             // example because a packaged runtime dependency is inaccessible).
             // Do not hide that failure behind a 250-second pipe timeout.
@@ -471,6 +548,10 @@ public static class WindowsAppContainerLauncher
             if (initialized) DeleteProcThreadAttributeList(attributes);
             if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
             if (capabilitiesPtr != IntPtr.Zero) Marshal.FreeHGlobal(capabilitiesPtr);
+            if (handleListBuffer != IntPtr.Zero) Marshal.FreeHGlobal(handleListBuffer);
+            if (inheritedInput != IntPtr.Zero) CloseHandle(inheritedInput);
+            if (inheritedNull != IntPtr.Zero) CloseHandle(inheritedNull);
+            if (nullSource != IntPtr.Zero) CloseHandle(nullSource);
             if (sid != IntPtr.Zero) FreeSid(sid);
         }
     }
@@ -548,6 +629,16 @@ public static class WindowsAppContainerLauncher
     private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
     [DllImport("kernel32.dll")]
     private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle,
+        IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint options);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string fileName, uint desiredAccess,
+        uint shareMode, IntPtr securityAttributes, uint creationDisposition,
+        uint flagsAndAttributes, IntPtr templateFile);
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr handle);
 }
