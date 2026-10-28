@@ -86,6 +86,28 @@ public sealed class AppContainerSeekableFdTests
         finally { RemoveFolderEventually(root); }
     }
 
+    [Fact]
+    public void GivenRegisteredMediaWasReplacedByAnotherFileAtSamePath_WhenGrantedHandleIsRequested_ThenItFailsClosed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string root = CreateFolder();
+        string original = Path.Combine(root, "identity.wav");
+        try
+        {
+            WriteWav(original);
+            var (catalog, registry, request) = Prepare(root, original);
+            string removed = Path.Combine(root, "previous-file.wav");
+            File.Move(original, removed);
+            WriteWav(original); // Same content/name but a different physical file ID.
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.ProbeAuthorizedSeekableMetadataTicks(
+                    GetWorker(), catalog, request));
+            Assert.Empty(Directory.GetFiles(root, ".editorworker-*"));
+            registry.RevokeTask(request.TaskId);
+        }
+        finally { RemoveFolderEventually(root); }
+    }
+
     private static void RunCase(string root, string original, TimeSpan duration)
     {
         string originalHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(original)));
