@@ -153,6 +153,10 @@ jobs:
         working-directory: tests/playwright
         run: npm run test:ci
 
+      - name: Auditar vulnerabilidades NuGet/npm, licencas e FFmpeg reais
+        shell: pwsh
+        run: ./tests/security/audit-dependencies.ps1
+
       - name: Publicar relatorios de testes
         if: always()
         uses: actions/upload-artifact@v6
@@ -164,6 +168,7 @@ jobs:
             TestResults/
             tests/playwright/playwright-report/
             tests/playwright/test-results/
+            TestResults/security-audit/
 
   poc0031-security-evidence:
     name: Security release gate — POC-003.1
