@@ -56,40 +56,7 @@ foreach ($name in @("ffmpeg", "ffprobe")) {
     # Zero-copy processing depends on seekable Windows HANDLE input.
     # Fail the build instead of silently reverting to 10 GB HDD copies.
     $protocols = & $tool -protocols
-    if ($LASTEXITCODE -ne 0 -or ($protocols -notmatch '^\\s*handle\\s*
-    if ((Get-Item (Join-Path $bundle ($name + ".exe"))).Length -ne (Get-Item $tool).Length) {
-        throw "Falha ao copiar o binário real de $name."
-    }
-}
-Write-Host "Ferramentas reais copiadas do mesmo diretório: $codecDir"
-# Windows must authorize the exact AppContainer package identity to read and
-# execute this bundle. Never grant Everyone, Users or all AppContainers.
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
-public static class WorkerBundleSid {
-    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
-    private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
-    [DllImport("advapi32.dll")]
-    private static extern IntPtr FreeSid(IntPtr sid);
-    public static string Get() {
-        IntPtr nativeSid;
-        int hr = DeriveAppContainerSidFromAppContainerName(
-            "MigaMelhore.EditorMultimedia.MediaWorker", out nativeSid);
-        if (hr < 0 || nativeSid == IntPtr.Zero) Marshal.ThrowExceptionForHR(hr);
-        try { return new SecurityIdentifier(nativeSid).Value; }
-        finally { FreeSid(nativeSid); }
-    }
-}
-'@
-$sid = [WorkerBundleSid]::Get()
-& icacls.exe $bundle /grant ("*" + $sid + ":(OI)(CI)RX") /T /C
-if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar acesso mínimo ao bundle AppContainer." }
-
-Write-Host "Bundle AppContainer preparado: $bundle"
-Write-Host "Worker, ffmpeg e ffprobe prontos. O worker continua protegido pelo token AppContainer e Job Object."
-)) {
+    if ($LASTEXITCODE -ne 0 -or -not (@($protocols) | Where-Object { $_ -match '^\s*handle\s*$' })) {
         throw "$name não contém o protocolo Windows handle: necessário para leitura sem cópia."
     }
     Copy-Item $tool (Join-Path $bundle ($name + ".exe")) -Force
