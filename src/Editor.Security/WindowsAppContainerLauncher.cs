@@ -378,12 +378,30 @@ public static class WindowsAppContainerLauncher
             // a conventional HDD needs a larger but still bounded deadline.
             // Timeout remains fail-closed: the Job is killed in finally.
             bool realMediaCommand = arguments.StartsWith("--process-", StringComparison.Ordinal);
-            uint wait = WaitForSingleObject(process.hProcess,
-                realMediaCommand ? 300000u : 5000u);
-            if (wait != 0)
-                throw new InvalidOperationException("Restricted diagnostic failed to exit in time.");
+            // A worker can fail before opening the controller-owned pipe (for
+            // example because a packaged runtime dependency is inaccessible).
+            // Do not hide that failure behind a 250-second pipe timeout.
+            uint maxWaitMs = realMediaCommand ? 300000u : 5000u;
+            uint elapsedMs = 0;
+            uint wait;
+            do
+            {
+                wait = WaitForSingleObject(process.hProcess, 100u);
+                if (wait == 0u) break;
+                if (wait != 258u) // WAIT_TIMEOUT
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Failed while waiting for the restricted worker process.");
+                elapsedMs += 100u;
+                if (serverTask is { IsFaulted: true } or { IsCanceled: true })
+                    serverTask.GetAwaiter().GetResult();
+            } while (elapsedMs < maxWaitMs);
+            if (wait != 0u)
+                throw new TimeoutException("Restricted worker did not exit within its bounded deadline.");
             if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (serverTask is not null && !serverTask.IsCompleted && exitCode != 0u)
+                throw new InvalidOperationException(
+                    $"AppContainer worker exited with status {ConvertNativeExitCode(exitCode)} before completing authenticated IPC.");
             if (serverTask is not null)
             {
                 var response = serverTask.GetAwaiter().GetResult();
