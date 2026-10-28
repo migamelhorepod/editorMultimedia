@@ -26,3 +26,14 @@ Data: 28/10/2026. Execução GitHub Actions #712: https://github.com/migamelhore
 - **Dado** zero avisos nas fontes NuGet/npm na execução #712, **quando** a auditoria é interpretada, **então** não se afirma ausência absoluta de CVEs ou conformidade legal.
 
 **Estado:** auditoria efetivamente executada, **sem advisories NuGet/npm identificados**; distribuição continua bloqueada por revisão GPL e CVEs nativos pendentes. Não marcar MIG-91 como Done.
+## Atualização — triagem efetiva de CVEs nativas FFmpeg (28/10/2026)
+
+A consulta aos registros públicos de segurança identificou **riscos conhecidos aplicáveis ao FFmpeg 9.0.2**; portanto o resultado de '0 advisories' vale somente para as consultas NuGet/npm, **não para a biblioteca nativa FFmpeg**.
+
+- **CVE-2026-107678:** NVD descreve vulnerabilidade até FFmpeg 9.0.2 em `av_encryption_init_info_free` e `mov_read_pssh`, permitindo MP4 especialmente preparado provocar exaustão de pilha e consumo quadrático de CPU. É relevante diretamente ao editor de vídeo que processa MP4. Fonte: https://nvd.nist.gov/vuln/detail/CVE-2026-107678
+- **CVE-2026-107696:** NVD descreve loop de redirecionamento RTSP até FFmpeg 9.0.2; a política de worker sem rede reduz essa superfície dentro do AppContainer, mas não remove o bug. Fonte: https://nvd.nist.gov/vuln/detail/CVE-2026-107696
+- O próprio projeto FFmpeg mantém o catálogo de correções: https://ffmpeg.org/security.html. A distribuição oficial lista a versão estável 9.0.2 em 28/10/2026: https://ffmpeg.org/download.html.
+
+**Gate fail-closed:** não liberar o decoder genérico em produção, não declarar segurança homologada e não publicar builds para usuários até obter versão/correção verificável (origem, hash e prova de resolução das CVEs) e repetir os testes de segurança e desempenho. A limitação de Job Object é mitigação de impacto, **não correção da falha nativa**. Não presumir que simplesmente atualizar o pacote Chocolatey resolverá o problema; verificar build real e patches presentes.
+
+**Rastreabilidade:** MIG-91 (cadeia de dependências e CVEs), MIG-11 (versões), MIG-12 (isolamento) e POC-003.2 (homologação). Estado MIG-91: **não concluída devido às vulnerabilidades nativas conhecidas, licença GPL e origem/reprodutibilidade**.
