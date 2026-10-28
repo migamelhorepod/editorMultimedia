@@ -51,3 +51,21 @@ Data 28/10/2026. Branch `feature/poc003-2-revogacao-recuperacao`; PR #8 permanec
 ## Bloqueio adicional de segurança nativa
 
 Em 28/10/2026 foram identificadas CVE-2026-107678 (MP4 pssh, CPU/pilha) e CVE-2026-107696 (RTSP redirect), relatadas como afetando FFmpeg até 9.0.2. O AppContainer mitiga impacto, não corrige. Registrar em `docs/MIG-91-RESULTADO-AUDITORIA-2026-10-28.md`; não homologar nem distribuir o decoder 9.0.2 até revisão de build/patch e licença GPLv3.
+
+## Execução física local Windows 11 / D: (instrumentação entregue)
+
+Script: `tests/security/homologate-physical-d.ps1` (commit `ebb5870`). **Não foi executado no computador da usuária nesta conversa; evidência física ainda ausente.**
+
+### Procedimento seguro no checkout do Visual Studio
+
+1. Na máquina com Windows 11 e HD convencional D:, conferir espaço livre, compilar o projeto em Release e preparar o worker AppContainer e codecs conforme `scripts/preparar-worker-appcontainer.ps1` (sem copiar mídias pessoais). O script de homologação recusa runners GitHub Actions, exige unidade D: fixa e cria uma pasta nova com GUID. Não altera pastas de biblioteca existentes.
+2. Abrir PowerShell 7 no diretório do repositório e executar: `pwsh -NoProfile -File tests/security/homologate-physical-d.ps1 -MediaMiB 64` (parâmetro opcional `-IncludeCrashRecovery`). O script gera WAV físico de 64 MiB, registra SHA-256 antes/depois, usa TEMP/TMP no D: para testes do AppContainer e captura TRX e duração; guarda relatório JSON em `TestResults/physical-windows11-hdd/physical-hdd-evidence.json`.
+3. Se falhar, **não apagar a pasta de evidências** nem desabilitar o gate; preservar logs e esclarecer se a versão/binário do codec é compatível. Remoção do diretório de fixture só após revisão humana do conteúdo.
+4. O script não é benchmark de 10 GiB: WAV RIFF clássico limita o tamanho abaixo de 4 GiB, e a verificação de 10 GiB requer fixture em outro contêiner e medições controladas de I/O, CPU, RAM, seek, revogação e tempo na máquina física. Não inferir sucesso a partir de 64 MiB.
+
+### Situação do FFmpeg em 28/10/2026
+
+- Página oficial `https://ffmpeg.org/download.html` lista **9.0.2** como última versão estável da série 9.0; os rastreadores Debian `https://security-tracker.debian.org/tracker/CVE-2026-107678` e `https://security-tracker.debian.org/tracker/CVE-2026-107696` ainda indicam correção **unfixed** no pacote acompanhado. Pull requests upstream são indicadas, sem prova de release estável com ambos os patches.
+- Não instalar automaticamente código de branch de desenvolvimento, release candidate ou executável não auditado para 'resolver' CVE. Continuar bloqueio fail-closed, rever correção upstream assinada e hash/termos de redistribuição quando surgir build estável verificável. A prova do worker é válida apenas para a distribuição exata testada e não equivale à mitigação de todas as entradas hostis.
+
+**Resultado de homologação física:** não executada; aguarda evidência gerada no Windows 11 local com volume D: e testes até 10 GiB. `MediaWorkerAdmission.IsMediaProcessingAvailable` permanece false.
