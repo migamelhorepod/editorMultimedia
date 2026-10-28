@@ -53,10 +53,15 @@ foreach ($name in @("ffmpeg", "ffprobe")) {
     if ($LASTEXITCODE -ne 0 -or $banner -notmatch 'version\s+9\.[0-9]+') {
         throw "$name deve ser versão estável 9.x: $banner"
     }
-    Copy-Item $tool (Join-Path $bundle ($name + ".exe")) -Force
-    if ((Get-Item (Join-Path $bundle ($name + ".exe"))).Length -ne (Get-Item $tool).Length) {
-        throw "Falha ao copiar o binário real de $name."
+    $target = Join-Path $bundle ($name + ".exe")
+    Copy-Item $tool $target -Force
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tool).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash
+    if ($sourceHash -ne $targetHash) {
+        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        throw "Hash SHA-256 divergente ao copiar $name; bundle não confiável."
     }
+    Write-Host "$name SHA-256: $targetHash"
 }
 Write-Host "Ferramentas reais copiadas do mesmo diretório: $codecDir"
 # Windows must authorize the exact AppContainer package identity to read and
