@@ -215,12 +215,14 @@ internal static class Program
             bool directFixturePassed = false;
             if (xunitPassed)
             {
-                var isolated = new IsolatedMediaProcessingService(
-                    caseFolder, Guid.NewGuid(),
-                    Path.Combine(testWorker, "Editor.Security.Worker.exe"));
                 try
                 {
-                    var probeTimer = Stopwatch.StartNew();
+                    var isolated = new IsolatedMediaProcessingService(
+                        caseFolder, Guid.NewGuid(),
+                        Path.Combine(testWorker, "Editor.Security.Worker.exe"));
+                    try
+                    {
+                        var probeTimer = Stopwatch.StartNew();
                     long durationTicks = isolated.InspectDurationTicks(fixture);
                     probeTimer.Stop();
                     report["fixtureMetadataDurationTicks"] = durationTicks;
@@ -236,11 +238,19 @@ internal static class Program
                     long tolerance = TimeSpan.FromMilliseconds(250).Ticks;
                     directFixturePassed = durationTicks > 0 &&
                         Math.Abs(durationTicks - expected) <= tolerance;
-                    report["fixtureDirectAppContainerPassed"] = directFixturePassed;
+                        report["fixtureDirectAppContainerPassed"] = directFixturePassed;
+                    }
+                    finally
+                    {
+                        isolated.RevokeAll();
+                    }
                 }
-                finally
+                catch (Exception directEx)
                 {
-                    isolated.RevokeAll();
+                    report["fixtureDirectAppContainerPassed"] = false;
+                    report["fixtureDirectError"] = directEx.ToString();
+                    Console.Error.WriteLine(
+                        "Falha no processamento fisico real: " + directEx.Message);
                 }
             }
             else
