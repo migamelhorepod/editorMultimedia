@@ -129,6 +129,35 @@ if (args.Length == 3 && args[0] == "--probe-fd-metadata")
     }
 }
 
+// POC-003.2 proof: decode one authorized inherited seekable file handle
+// using real FFmpeg without a staged copy, within the AppContainer Job.
+if (args.Length == 3 && args[0] == "--probe-fd-decode")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    if (!Guid.TryParseExact(args[2], "N", out Guid requestId) ||
+        requestId == Guid.Empty) return 71;
+    string codec = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
+    if (!File.Exists(codec)) return 75;
+    try
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        if (await WindowsInheritedHandleFfprobe.DecodeToNullAsync(codec, deadline.Token) != 0)
+            return 77;
+        using var reportDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[1],
+            new WindowsWorkerMetadataPipe.MetadataReport(
+                WorkerRequest.CurrentVersion, requestId, 1),
+            reportDeadline.Token);
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+        System.ComponentModel.Win32Exception or OperationCanceledException or
+        TimeoutException or InvalidDataException)
+    {
+        return 78;
+    }
+}
+
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
