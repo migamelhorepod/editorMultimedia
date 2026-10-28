@@ -12,6 +12,9 @@ namespace Editor.Timeline.Tests;
 /// </summary>
 public sealed class AppContainerStageRecoveryTests
 {
+    private static string LeaseProof(Guid id) =>
+        "MigaMelhore.EditorMultimedia.AppContainerStage.v1|" + id.ToString("N");
+
     private static string Worker()
     {
         string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -80,11 +83,12 @@ public sealed class AppContainerStageRecoveryTests
             string liveInput = Path.Combine(nested, liveStem + ".input.wav");
             string liveLease = Path.Combine(nested, liveStem + ".lease");
             File.WriteAllText(staleInput, "crash copy");
-            File.WriteAllText(staleLease, "");
+            File.WriteAllText(staleLease, LeaseProof(staleId));
             File.WriteAllText(liveInput, "live worker");
             string unrelated = Path.Combine(nested, "do-not-delete.wav");
             File.WriteAllText(unrelated, "user media");
-            using (var heldLease = new FileStream(liveLease, FileMode.CreateNew,
+            File.WriteAllText(liveLease, LeaseProof(liveId));
+            using (var heldLease = new FileStream(liveLease, FileMode.Open,
                        FileAccess.ReadWrite, FileShare.None))
             {
                 var service = new IsolatedMediaProcessingService(root, Guid.NewGuid(), Worker());
@@ -127,8 +131,9 @@ public sealed class AppContainerStageRecoveryTests
         start.ArgumentList.Add("-Command");
         start.ArgumentList.Add(
             "[IO.File]::WriteAllText(" + Quote(stage) + ", 'partial'); " +
+            "[IO.File]::WriteAllText(" + Quote(marker) + ", " + Quote(LeaseProof(id)) + "); " +
             "$lease = [IO.File]::Open(" + Quote(marker) +
-            ", [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); " +
+            ", [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); " +
             "[Console]::WriteLine('READY'); Start-Sleep -Seconds 30");
         using var owner = Process.Start(start)
             ?? throw new InvalidOperationException("Cannot start crash-injection process.");
