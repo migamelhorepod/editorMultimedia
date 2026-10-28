@@ -68,6 +68,40 @@ public sealed class AppContainerSeekableFdTests
     }
 
     [Fact]
+    public void GivenAuthorizedWav_WhenFfmpegDecodesFdInSandbox_ThenNoStageAndSourceIsUnchanged()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string root = CreateFolder();
+        string input = Path.Combine(root, "decode-real.wav");
+        try
+        {
+            WriteWav(input);
+            string before = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input)));
+            string acl = GetAcl(input);
+            var (catalog, registry, request) = Prepare(root, input);
+            Guid readGrant = registry.Issue(request.TaskId, request.LibraryId,
+                request.ResourceId, MediaAccessOperation.ReadChunk, TimeSpan.FromMinutes(1));
+            var decode = request with
+            {
+                RequestId = Guid.NewGuid(),
+                GrantId = readGrant,
+                Operation = MediaAccessOperation.ReadChunk
+            };
+            WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
+                GetWorker(), catalog, decode);
+            Assert.Equal(before,
+                Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(input))));
+            Assert.Equal(acl, GetAcl(input));
+            Assert.Empty(Directory.GetFiles(root, ".editorworker-*"));
+            registry.RevokeTask(request.TaskId);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
+                    GetWorker(), catalog, decode));
+        }
+        finally { RemoveFolderEventually(root); }
+    }
+
+    [Fact]
     public void GivenRevokedGrant_WhenFdProbeIsRequested_ThenNoWorkerGetsAnInputHandle()
     {
         if (!OperatingSystem.IsWindows()) return;
