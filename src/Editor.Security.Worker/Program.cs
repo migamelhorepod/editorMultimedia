@@ -101,7 +101,7 @@ if (args.Length == 3 && args[0] == "--probe-fd-metadata")
     if (!File.Exists(ffprobe)) return 75;
     try
     {
-        using var probeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var probeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
         var (exitCode, output) =
             await WindowsInheritedHandleFfprobe.ReadDurationAsync(
                 ffprobe, probeDeadline.Token);
@@ -140,7 +140,7 @@ if (args.Length == 3 && args[0] == "--probe-fd-decode")
     if (!File.Exists(codec)) return 75;
     try
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
         if (await WindowsInheritedHandleFfprobe.DecodeToNullAsync(codec, deadline.Token) != 0)
             return 77;
         using var reportDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
