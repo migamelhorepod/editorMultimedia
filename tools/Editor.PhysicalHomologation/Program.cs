@@ -142,7 +142,7 @@ internal static class Program
             string logPath = Path.Combine(evidence, "physical-test-output.log");
             int exit;
             long elapsedMilliseconds;
-            long peakWorkingSet;
+            long? peakWorkingSet = null;
             using (var log = new StreamWriter(logPath, append: false,
                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
             using (var child = Process.Start(start)
@@ -164,21 +164,45 @@ internal static class Program
                 var timer = Stopwatch.StartNew();
                 child.BeginOutputReadLine();
                 child.BeginErrorReadLine();
-                if (!child.WaitForExit(10 * 60 * 1000))
+                // Process.PeakWorkingSet64 throws InvalidOperationException after
+                // exit on Windows. Sample memory while the test process is alive,
+                // and never let an optional metric erase real xUnit evidence.
+                while (!child.WaitForExit(200))
                 {
-                    child.Kill(entireProcessTree: true);
-                    child.WaitForExit();
-                    throw new TimeoutException("Testes excederam dez minutos; nenhum gate aprovado.");
+                    if (timer.Elapsed >= TimeSpan.FromMinutes(10))
+                    {
+                        child.Kill(entireProcessTree: true);
+                        child.WaitForExit();
+                        throw new TimeoutException(
+                            "Testes excederam dez minutos; nenhum gate aprovado.");
+                    }
+                    try
+                    {
+                        child.Refresh();
+                        long sample = child.PeakWorkingSet64;
+                        peakWorkingSet = Math.Max(peakWorkingSet ?? 0, sample);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The process may have exited between WaitForExit
+                        // and the optional memory sample.
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                        // An unavailable metric is recorded as null, not
+                        // reported as a failed test or as a fabricated zero.
+                    }
                 }
                 child.WaitForExit();
                 timer.Stop();
                 exit = child.ExitCode;
                 elapsedMilliseconds = timer.ElapsedMilliseconds;
-                peakWorkingSet = child.PeakWorkingSet64;
             }
             report["testExitCode"] = exit;
             report["testsElapsedSeconds"] = Math.Round(elapsedMilliseconds / 1000d, 2);
             report["testRunnerPeakWorkingSetBytes"] = peakWorkingSet;
+            report["memoryMetricAvailable"] = peakWorkingSet.HasValue;
+            report["memoryMetricScope"] = "dotnet test process only; not AppContainer child or codec";
             (int total, int failures) = ReadTrx(Path.Combine(evidence, "physical.trx"));
             report["observedTrxCases"] = total;
             report["observedTrxFailures"] = failures;
