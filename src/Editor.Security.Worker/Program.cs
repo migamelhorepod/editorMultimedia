@@ -88,6 +88,63 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
     }
 }
 
+// MIG-12 research-only path: FFprobe reads a regular file HANDLE received
+// as inherited STDIN (fd:0). No filesystem path is delivered to this worker.
+// This is not an enabled production media operation.
+if (args.Length == 3 && args[0] == "--probe-fd-metadata")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    if (!Guid.TryParseExact(args[2], "N", out var requestId) ||
+        requestId == Guid.Empty) return 71;
+    string ffprobe = Path.Combine(AppContext.BaseDirectory, "ffprobe.exe");
+    if (!File.Exists(ffprobe)) return 75;
+    var command = new ProcessStartInfo(ffprobe)
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        RedirectStandardInput = false // keep the seekable Win32 file handle
+    };
+    foreach (string arg in new[] {
+        "-v", "error", "-protocol_whitelist", "fd",
+        "-i", "fd:0", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1" })
+        command.ArgumentList.Add(arg);
+    try
+    {
+        using var toolProcess = Process.Start(command);
+        if (toolProcess is null) return 76;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var standardOutput = toolProcess.StandardOutput.ReadToEndAsync(deadline.Token);
+        var standardError = toolProcess.StandardError.ReadToEndAsync(deadline.Token);
+        await toolProcess.WaitForExitAsync(deadline.Token);
+        string output = await standardOutput;
+        _ = await standardError;
+        if (toolProcess.ExitCode != 0) return 77;
+        string? durationLine = output.Split('\n').FirstOrDefault(
+            s => s.Trim().StartsWith("duration=", StringComparison.Ordinal));
+        if (durationLine is null ||
+            !double.TryParse(durationLine.Trim()["duration=".Length..],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var duration) ||
+            !double.IsFinite(duration) || duration is <= 0 or > 604800)
+            return 79;
+        long ticks = checked((long)Math.Round(duration * TimeSpan.TicksPerSecond));
+        using var pipeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[1],
+            new WindowsWorkerMetadataPipe.MetadataReport(
+                WorkerRequest.CurrentVersion, requestId, ticks), pipeTimeout.Token);
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+        System.ComponentModel.Win32Exception or OperationCanceledException or
+        InvalidDataException or OverflowException)
+    {
+        return 78;
+    }
+}
+
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
