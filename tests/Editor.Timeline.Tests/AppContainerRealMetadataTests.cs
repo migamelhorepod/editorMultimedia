@@ -85,7 +85,7 @@ public sealed class AppContainerRealMetadataTests
             Assert.Throws<UnauthorizedAccessException>(() =>
                 WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing(worker, catalog, request));
         }
-        finally { Directory.Delete(folder, true); }
+        finally { WindowsMediaFixtureCleanup.Remove(folder); }
     }
     [Fact]
     public void GivenMalformedRegisteredMedia_WhenSandboxedFfprobeRuns_ThenItFailsClosedAndPreservesOriginal()
@@ -115,7 +115,7 @@ public sealed class AppContainerRealMetadataTests
         }
         finally
         {
-            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+            if (Directory.Exists(folder)) WindowsMediaFixtureCleanup.Remove(folder);
         }
     }
 
