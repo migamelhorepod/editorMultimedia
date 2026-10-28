@@ -104,26 +104,12 @@ public static class WindowsAppContainerLauncher
     public static int RunAuthorizedMetadataProcessing(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
         if (request.Operation != MediaAccessOperation.InspectMetadata)
             throw new UnauthorizedAccessException("Metadata processing requires InspectMetadata grant.");
-        string authorizedPath = catalog.Resolve(request);
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException();
-        if (!string.Equals(Path.GetFileName(workerExecutable),
-            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
-        if (authorizedPath.IndexOfAny(['"', '\r', '\n']) >= 0)
-            throw new UnauthorizedAccessException("Invalid authorized file path.");
-        using var staged = new WindowsScopedCodecInput(authorizedPath);
-        // Staging may take seconds or minutes on a conventional HDD. A grant
-        // revoked or expired during copying MUST NOT authorize a new worker.
-        if (!string.Equals(catalog.Resolve(request), authorizedPath, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Media authority changed during staging.");
-        // The copy is destroyed only after LaunchDiagnostic has exited/killed
-        // its suspended-start, token-verified, resource-limited child Job.
-        return LaunchDiagnostic(workerExecutable,
-            "--process-metadata \"" + staged.Path + "\"", true);
+        return RunWithInheritedReadHandle(workerExecutable, catalog, request,
+            input => LaunchDiagnostic(workerExecutable,
+                "--process-metadata-handle " + input.ToInt64(), true,
+                inheritedInputHandle: input));
     }
 
     /// <summary>
