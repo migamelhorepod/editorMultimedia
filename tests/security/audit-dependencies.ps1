@@ -16,6 +16,9 @@ $report = [ordered]@{
     nugetPackages = @()
     ffmpeg = @{}
     manualLicenseReviewRequired = $true
+    nativeVulnerabilityReviewRequired = $true
+    knownFfmpegAdvisories = @()
+    readyForDistribution = $false
     errors = @()
 }
 function Save-Report {
@@ -132,6 +135,26 @@ try {
         gplBuild = ($configuration -match "(^|\s)--enable-gpl(\s|$)")
         licenseReview = "Inspect real distribution build flags and LGPL/GPL obligations before release."
     }
+    # Explicit high-risk native dependency triage, because NuGet/npm advisory
+    # registries do not analyze the separately downloaded FFmpeg executable.
+    # This list is a small, dated safety baseline, NOT a comprehensive CVE feed.
+    if ([string]$report.ffmpeg.version -match '^ffmpeg version 9\.0\.2([ -]|$)') {
+        $report.knownFfmpegAdvisories += [ordered]@{
+            id = "CVE-2026-107678"
+            impact = "Crafted MP4 pssh list can cause stack exhaustion and quadratic CPU use."
+            affected = "FFmpeg through 9.0.2"
+            reference = "https://nvd.nist.gov/vuln/detail/CVE-2026-107678"
+            mitigation = "Block generic untrusted media processing until patched build verified."
+        }
+        $report.knownFfmpegAdvisories += [ordered]@{
+            id = "CVE-2026-107696"
+            impact = "Unbounded RTSP 3xx redirects can produce CPU exhaustion."
+            affected = "FFmpeg through 9.0.2"
+            reference = "https://nvd.nist.gov/vuln/detail/CVE-2026-107696"
+            mitigation = "Networkless AppContainer reduces reachability; patched build still required."
+        }
+    }
+    Write-Host "Native FFmpeg advisories flagged: $($report.knownFfmpegAdvisories.Count); distribution not approved."
     # A lightweight CycloneDX 1.5 component inventory; license declarations
     # are evidence to review, not an automatic conclusion of legal compliance.
     $components = @()
