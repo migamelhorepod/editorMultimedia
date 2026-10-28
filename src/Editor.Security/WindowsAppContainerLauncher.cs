@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
-using Microsoft.Win32.SafeHandles;
 
 namespace Editor.Security;
 
@@ -19,8 +18,6 @@ public static class WindowsAppContainerLauncher
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private const uint CreateSuspended = 0x00000004;
     private static readonly nuint SecurityCapabilitiesAttribute = 0x00020009;
-    private static readonly nuint InheritedHandleListAttribute = 0x00020002;
-    private const uint DuplicateSameAccess = 0x00000002;
 
     public static int StartSuspended(string executable, string arguments) =>
         LaunchDiagnostic(executable, arguments, false);
@@ -104,12 +101,26 @@ public static class WindowsAppContainerLauncher
     public static int RunAuthorizedMetadataProcessing(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         if (request.Operation != MediaAccessOperation.InspectMetadata)
             throw new UnauthorizedAccessException("Metadata processing requires InspectMetadata grant.");
-        return RunWithInheritedReadHandle(workerExecutable, catalog, request,
-            input => LaunchDiagnostic(workerExecutable,
-                "--process-metadata-handle " + input.ToInt64(), true,
-                inheritedInputHandle: input));
+        string authorizedPath = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
+        if (authorizedPath.IndexOfAny(['"', '\r', '\n']) >= 0)
+            throw new UnauthorizedAccessException("Invalid authorized file path.");
+        using var staged = new WindowsScopedCodecInput(authorizedPath);
+        // Staging may take seconds or minutes on a conventional HDD. A grant
+        // revoked or expired during copying MUST NOT authorize a new worker.
+        if (!string.Equals(catalog.Resolve(request), authorizedPath, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
+        // The copy is destroyed only after LaunchDiagnostic has exited/killed
+        // its suspended-start, token-verified, resource-limited child Job.
+        return LaunchDiagnostic(workerExecutable,
+            "--process-metadata \"" + staged.Path + "\"", true);
     }
 
     /// <summary>
@@ -125,21 +136,32 @@ public static class WindowsAppContainerLauncher
     public static long ReadAuthorizedMetadataTicks(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         if (request.Operation != MediaAccessOperation.InspectMetadata)
             throw new UnauthorizedAccessException("Metadata requires InspectMetadata authorization.");
+        string source = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Invalid isolated worker executable.");
+
+        using var staged = new WindowsScopedCodecInput(source);
+        // The staging copy may be slow on a conventional HDD. Never launch
+        // after the task grant has expired or been revoked during that copy.
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
         var pipe = new WindowsWorkerMetadataPipe();
         long ticks = 0;
-        int exit = RunWithInheritedReadHandle(workerExecutable, catalog, request,
-            input => LaunchDiagnostic(workerExecutable,
-                "--process-metadata-handle " + input.ToInt64() + " " +
-                    pipe.Name + " " + request.RequestId.ToString("N"), true,
-                async pid =>
-                {
-                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
-                    ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
-                    return new WorkerResponse(WorkerRequest.CurrentVersion,
-                        request.RequestId, AccessDecision.Allowed);
-                }, inheritedInputHandle: input));
+        string args = "--process-metadata-report \"" + staged.Path + "\" " +
+            pipe.Name + " " + request.RequestId.ToString("N");
+        int exit = LaunchDiagnostic(workerExecutable, args, true,
+            async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
+                ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            });
         if (exit != 0 || ticks <= 0)
             throw new InvalidDataException("Isolated worker did not return valid metadata.");
         return ticks;
@@ -148,82 +170,52 @@ public static class WindowsAppContainerLauncher
     public static int RunAuthorizedDecodeProcessing(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         if (request.Operation != MediaAccessOperation.ReadChunk)
             throw new UnauthorizedAccessException("Real decoding requires a ReadChunk grant.");
-        return RunWithInheritedReadHandle(workerExecutable, catalog, request,
-            input => LaunchDiagnostic(workerExecutable,
-                "--process-decode-handle " + input.ToInt64(), true,
-                inheritedInputHandle: input));
+        string source = catalog.Resolve(request);
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable),
+            "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
+        using var staged = new WindowsScopedCodecInput(source);
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media authority changed during staging.");
+        return LaunchDiagnostic(workerExecutable,
+            "--process-decode \"" + staged.Path + "\"", true);
     }
 
     /// <summary>
-    /// Security regression only: authenticate a live decoder and close its
-    /// Job Object; the direct source HANDLE must become unusable afterwards.
+    /// Security regression only: start a real FFmpeg child in a verified
+    /// AppContainer, authenticate its readiness by kernel PID, then forcibly
+    /// close its restricted Job. Never returns decoded user data.
     /// </summary>
     public static int RunAuthorizedInterruptedDecodeProbe(
         string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         if (request.Operation != MediaAccessOperation.ReadChunk)
             throw new UnauthorizedAccessException("An interrupted decoder requires ReadChunk authorization.");
-        var pipe = new WindowsWorkerMetadataPipe();
-        return RunWithInheritedReadHandle(workerExecutable, catalog, request,
-            input => LaunchDiagnostic(workerExecutable,
-                "--probe-held-decode-handle " + input.ToInt64() + " " +
-                    pipe.Name + " " + request.RequestId.ToString("N"), true,
-                async pid =>
-                {
-                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                    _ = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
-                    return new WorkerResponse(WorkerRequest.CurrentVersion,
-                        request.RequestId, AccessDecision.Allowed);
-                }, terminateAfterHandshake: true, inheritedInputHandle: input));
-    }
-
-    /// <summary>
-    /// No staging copy, original ACL change, or filesystem path crosses the
-    /// AppContainer boundary. Windows inherits exactly one read-only handle
-    /// via PROC_THREAD_ATTRIBUTE_HANDLE_LIST. FFmpeg receives a SEEKABLE
-    /// regular-file handle and never opens the original pathname itself.
-    /// </summary>
-    private static int RunWithInheritedReadHandle(string workerExecutable,
-        AuthorizedMediaCatalog catalog, WorkerRequest request, Func<IntPtr, int> launch)
-    {
-        ArgumentNullException.ThrowIfNull(catalog);
+        string source = catalog.Resolve(request);
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         if (!string.Equals(Path.GetFileName(workerExecutable),
                 "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
-        string source = catalog.Resolve(request);
-        // Open the object itself, never follow a last-component reparse point.
-        // GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, OPEN_REPARSE_POINT.
-        using SafeFileHandle opened = CreateReadOnlyMediaHandle(source, 0x80000000u,
-            0x00000001u, IntPtr.Zero, 3u, 0x00200000u | 0x10000000u,
-            IntPtr.Zero);
-        if (opened.IsInvalid)
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                "Cannot open only the authorized original media.");
-        if (!GetFileInformationByHandle(opened, out var sourceInfo) ||
-            (sourceInfo.Attributes & (uint)FileAttributes.ReparsePoint) != 0)
-            throw new UnauthorizedAccessException("A redirected media file handle is not permitted.");
-        long length = RandomAccess.GetLength(opened);
-        if (length <= 0 || length > 10L * 1024 * 1024 * 1024)
-            throw new IOException("Authorized media exceeds the bounded input size.");
-        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0 ||
-            !string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Authorized media changed during handle acquisition.");
-
-        if (!DuplicateHandle(GetCurrentProcess(), opened.DangerousGetHandle(),
-                GetCurrentProcess(), out IntPtr inherited, 0, true, DuplicateSameAccess))
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                "Could not prepare the single read-only inherited media handle.");
-        try
-        {
-            return launch(inherited);
-        }
-        finally
-        {
-            CloseHandle(inherited);
-        }
+            throw new UnauthorizedAccessException("Only the dedicated worker is allowed.");
+        using var staged = new WindowsScopedCodecInput(source);
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media grant changed during staging.");
+        var pipe = new WindowsWorkerMetadataPipe();
+        string args = "--probe-held-decode \"" + staged.Path + "\" " +
+            pipe.Name + " " + request.RequestId.ToString("N");
+        return LaunchDiagnostic(workerExecutable, args, true,
+            async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                _ = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            }, terminateAfterHandshake: true);
     }
 
     public static int RunAuthorizedCodecIsolationProbe(
@@ -262,7 +254,7 @@ public static class WindowsAppContainerLauncher
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
         Action<int>? processVerified = null, string? profileName = null,
-        bool terminateAfterHandshake = false, IntPtr inheritedInputHandle = default)
+        bool terminateAfterHandshake = false)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException();
@@ -307,13 +299,7 @@ public static class WindowsAppContainerLauncher
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
             arguments.StartsWith("--probe-held-decode \"", StringComparison.Ordinal) &&
             authenticatedServer is not null && terminateAfterHandshake && run;
-        var isHandleCodec = inheritedInputHandle != IntPtr.Zero && run &&
-            string.Equals(Path.GetFileName(executable), "Editor.Security.Worker.exe",
-                StringComparison.OrdinalIgnoreCase) &&
-            (arguments.StartsWith("--process-metadata-handle ", StringComparison.Ordinal) ||
-             arguments.StartsWith("--process-decode-handle ", StringComparison.Ordinal) ||
-             arguments.StartsWith("--probe-held-decode-handle ", StringComparison.Ordinal));
-        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe && !isHeldDecoderProbe && !isHandleCodec)
+        if (!isInertCommand && !isWorkerProbe && !isNetworkProbe && !isExternalProbe && !isIpcProbe && !isCodecProbe && !isForeignProbe && !isMetadataReportProbe && !isHeldDecoderProbe)
             throw new UnauthorizedAccessException("Unsupported AppContainer executable or operation.");
 
         // No arbitrary command line may reach a diagnostic shell.
@@ -323,7 +309,6 @@ public static class WindowsAppContainerLauncher
 
         string selectedProfile = profileName ?? WindowsAppContainerPreflight.ProfileName;
         IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, capabilitiesPtr = IntPtr.Zero;
-        IntPtr inheritedList = IntPtr.Zero;
         PROCESS_INFORMATION process = default;
         WindowsWorkerJob? resourceJob = null;
         bool initialized = false;
@@ -347,12 +332,11 @@ public static class WindowsAppContainerLauncher
                     hr < 0 ? hr : unchecked((int)0x80004005));
 
             nuint bytes = 0;
-            int attributeCount = inheritedInputHandle != IntPtr.Zero ? 2 : 1;
-            InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref bytes);
+            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
             if (bytes == 0)
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             attributes = Marshal.AllocHGlobal(checked((nint)bytes));
-            if (!InitializeProcThreadAttributeList(attributes, attributeCount, 0, ref bytes))
+            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref bytes))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             initialized = true;
 
@@ -364,28 +348,18 @@ public static class WindowsAppContainerLauncher
                 IntPtr.Zero, IntPtr.Zero))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
-            if (inheritedInputHandle != IntPtr.Zero)
-            {
-                inheritedList = Marshal.AllocHGlobal(IntPtr.Size);
-                Marshal.WriteIntPtr(inheritedList, inheritedInputHandle);
-                if (!UpdateProcThreadAttribute(attributes, 0, InheritedHandleListAttribute,
-                        inheritedList, (nuint)IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
-                    throw new Win32Exception(Marshal.GetLastWin32Error(),
-                        "Windows refused the exact inherited media handle list.");
-            }
-
             var startup = new STARTUPINFOEX();
             startup.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
             startup.lpAttributeList = attributes;
             string commandLine = "\"" + executable + "\" " + arguments;
             if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero,
-                inheritedInputHandle != IntPtr.Zero, ExtendedStartupInfoPresent | CreateSuspended,
+                false, ExtendedStartupInfoPresent | CreateSuspended,
                 IntPtr.Zero, Environment.SystemDirectory, ref startup, out process))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     "Windows refused the AppContainer diagnostic process.");
             // Assign hard resource limits before any code could run.
             resourceJob = WindowsWorkerJob.AttachProcessHandle(process.hProcess,
-                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe || isHeldDecoderProbe || isHandleCodec) ? 2u : 1u);
+                256 * 1024 * 1024, (isCodecProbe || isMetadataReportProbe || isHeldDecoderProbe) ? 2u : 1u);
             // Verify the real process token; requesting a sandbox is not proof.
             if (!OpenProcessToken(process.hProcess, 0x0008, out IntPtr token))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
@@ -496,7 +470,6 @@ public static class WindowsAppContainerLauncher
             if (initialized) DeleteProcThreadAttributeList(attributes);
             if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
             if (capabilitiesPtr != IntPtr.Zero) Marshal.FreeHGlobal(capabilitiesPtr);
-            if (inheritedList != IntPtr.Zero) Marshal.FreeHGlobal(inheritedList);
             if (sid != IntPtr.Zero) FreeSid(sid);
         }
     }
@@ -566,34 +539,6 @@ public static class WindowsAppContainerLauncher
     [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "GetTokenInformation")]
     private static extern bool GetTokenInformationBuffer(IntPtr token, int informationClass,
         IntPtr information, int length, out int returnLength);
-    [StructLayout(LayoutKind.Sequential)]
-    private struct BY_HANDLE_FILE_INFORMATION
-    {
-        public uint Attributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW",
-        CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateReadOnlyMediaHandle(
-        string name, uint access, uint share, IntPtr security,
-        uint disposition, uint flags, IntPtr template);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION fileInformation);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle,
-        IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess,
-        bool inheritHandle, uint options);
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll", SetLastError = true)]
