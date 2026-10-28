@@ -1,3 +1,5 @@
+> **Estado atual — branch `feature/poc003-2-revogacao-recuperacao` (28/10/2026):** o cabeçalho `v6.5 / POC-001` abaixo é histórico e não descreve a entrega produtiva completa. A POC-003.2 de processamento AppContainer segue **não homologada**; não fazer merge da [PR #8](https://github.com/migamelhorepod/editorMultimedia/pull/8) nem desbloquear `MediaWorkerAdmission` sem evidência Windows 11/HD. Consulte a [auditoria de conformidade com a habilidade de desenvolvimento](docs/AUDITORIA-SKILL-ANALISTA-SENIOR-2026-10-28.md), a [ADR de entrada seekable](docs/ADR-POC0032-ACESSO-DIRETO-HANDLE.md) e o [checklist de homologação](docs/POC-003.2-checklist-homologacao.md). **IDE recomendada:** Visual Studio no Windows; comandos CMD e documentação histórica podem mencionar VS Code. Preservar a meta anteriormente aprovada de 16 GB como referência mais exigente; a habilidade atual informa que o computador possui 24 GB.
+
 # Editor Multimídia — v6.5 · Fechamento integrado da POC-001
 
 **Windows · C# · .NET 10 · WPF · VS Code · GitHub.**
