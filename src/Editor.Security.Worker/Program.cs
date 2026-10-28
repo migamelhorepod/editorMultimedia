@@ -93,11 +93,13 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 // fixture with a dedicated Windows ACL is permitted by the test harness.
 if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" ||
     args[0] == "--process-metadata" || args[0] == "--process-decode")) ||
-    (args.Length == 4 && args[0] == "--process-metadata-report"))
+    (args.Length == 4 && (args[0] == "--process-metadata-report" ||
+                          args[0] == "--probe-held-decode")))
 {
     if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
     if (!Path.IsPathFullyQualified(args[1])) return 71;
-    string tool = args[0] is "--probe-ffmpeg" or "--process-decode" ? "ffmpeg.exe" : "ffprobe.exe";
+    string tool = args[0] is "--probe-ffmpeg" or "--process-decode" or "--probe-held-decode"
+        ? "ffmpeg.exe" : "ffprobe.exe";
     string executable = Path.Combine(AppContext.BaseDirectory, tool);
     if (!File.Exists(executable)) return 75;
     var start = new ProcessStartInfo(executable)
@@ -108,6 +110,9 @@ if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ff
         RedirectStandardError = true
     };
     if (tool == "ffmpeg.exe") start.ArgumentList.Add("-nostdin");
+    // Test-only forced-kill proof: keep a real decoder alive until its
+    // controller authenticates readiness and terminates the Job Object.
+    if (args[0] == "--probe-held-decode") start.ArgumentList.Add("-re");
     start.ArgumentList.Add("-v");
     start.ArgumentList.Add("error");
     start.ArgumentList.Add("-i");
@@ -129,6 +134,22 @@ if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ff
     {
         using var process = Process.Start(start);
         if (process is null) return 76;
+        if (args[0] == "--probe-held-decode")
+        {
+            if (!Guid.TryParseExact(args[3], "N", out Guid readyRequestId) ||
+                readyRequestId == Guid.Empty)
+                return 71;
+            await Task.Delay(150);
+            if (process.HasExited) return 77;
+            using var readyDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[2],
+                new WindowsWorkerMetadataPipe.MetadataReport(
+                    WorkerRequest.CurrentVersion, readyRequestId, 1), readyDeadline.Token);
+            // No success exit: only the controller's Job close may end both
+            // this worker and the real FFmpeg subprocess in this test.
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+            return 78;
+        }
         // A genuine decode may exceed a brief diagnostic timeout on HDD.
         // The controller Job enforces an outer 5-minute deadline.
         using var cancel = new CancellationTokenSource(
