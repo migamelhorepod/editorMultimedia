@@ -35,14 +35,9 @@ public sealed class AppContainerRealMetadataTests
                 writer.Write(sampleCount);
                 writer.Write(Enumerable.Repeat((byte)128, sampleCount).ToArray());
             }
-            var sid = WindowsAppContainerPreflight.DerivePackageSid();
-            var start = new ProcessStartInfo("icacls.exe") { UseShellExecute = false };
-            start.ArgumentList.Add(wav);
-            start.ArgumentList.Add("/grant");
-            start.ArgumentList.Add("*" + sid + ":R");
-            using var acl = Process.Start(start)!;
-            Assert.True(acl.WaitForExit(5000));
-            Assert.Equal(0, acl.ExitCode);
+            // The original user media must NOT receive an AppContainer SID
+            // ACL grant: only the controller-owned inherited read HANDLE is
+            // permitted to cross the process boundary.
 
             Guid library = Guid.NewGuid(), task = Guid.NewGuid(), resource = Guid.NewGuid();
             var registry = new AccessGrantRegistry(library);
