@@ -49,7 +49,10 @@ public sealed class IsolatedMediaProcessingService
                 MediaAccessOperation.InspectMetadata, AccessGrantRegistry.MaxGrantLifetime);
             var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
                 task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.InspectMetadata);
-            return WindowsAppContainerLauncher.ReadAuthorizedMetadataTicks(
+            // Proven on Windows CI with WAV and MP4 moov-at-end: the real
+            // FFprobe reads an isolated, seekable kernel HANDLE directly.
+            // There is no proportional staging copy on the HDD.
+            return WindowsAppContainerLauncher.ProbeAuthorizedSeekableMetadataTicks(
                 workerExecutable, catalog, request);
         }
         finally
