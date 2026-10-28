@@ -92,4 +92,34 @@ public sealed class WorkerIpcCompletionPolicyTests
             "Non-zero exit must not stall for the post-exit grace period.");
     }
 
+    [Fact]
+    public void GivenMalformedIpcResponse_WhenWorkerExitsZero_ThenControllerPropagatesProtocolFailure()
+    {
+        var malformed = Task.FromException<WorkerResponse>(
+            new InvalidDataException("Malformed IPC frame"));
+        Assert.Throws<InvalidDataException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(malformed, 0));
+    }
+
+    [Fact]
+    public void GivenIpcNeverFinishes_WhenGraceExpires_ThenControllerFailsClosed()
+    {
+        var pending = new TaskCompletionSource<WorkerResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var failure = Assert.Throws<InvalidOperationException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(
+                pending.Task, 0, TimeSpan.FromMilliseconds(50)));
+        Assert.IsType<TimeoutException>(failure.InnerException);
+    }
+
+    [Fact]
+    public void GivenIpcWasCanceled_WhenWorkerExitsWithError_ThenControllerDoesNotReportSuccess()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var response = Task.FromCanceled<WorkerResponse>(cancelled.Token);
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(response, 77));
+    }
+
 }
