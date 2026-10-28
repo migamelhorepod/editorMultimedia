@@ -447,12 +447,13 @@ public static class WindowsAppContainerLauncher
                 throw new TimeoutException("Restricted worker did not exit within its bounded deadline.");
             if (!GetExitCodeProcess(process.hProcess, out uint exitCode))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
-            if (serverTask is not null && !serverTask.IsCompleted && exitCode != 0u)
-                throw new InvalidOperationException(
-                    $"AppContainer worker exited with status {ConvertNativeExitCode(exitCode)} before completing authenticated IPC.");
             if (serverTask is not null)
             {
-                var response = serverTask.GetAwaiter().GetResult();
+                // An exit status of zero does not prove that authenticated IPC
+                // completed. An early "successful" exit must never block the
+                // controller indefinitely waiting on the named-pipe server.
+                var response = WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(
+                    serverTask, ConvertNativeExitCode(exitCode));
                 if (MediaWorkerAdmission.IsMediaProcessingAvailable)
                     throw new UnauthorizedAccessException("Media processing must remain unavailable.");
             }
