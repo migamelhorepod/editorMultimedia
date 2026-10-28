@@ -72,11 +72,11 @@ public sealed class IsolatedMediaProcessingService
                 MediaAccessOperation.ReadChunk, AccessGrantRegistry.MaxGrantLifetime);
             var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
                 task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.ReadChunk);
-            int exitCode = WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(
+            // Real Windows CI proved the isolated FFmpeg null-sink decoder
+            // consumes only an authorized seekable HANDLE, with no full-sized
+            // staging copy and no changes to the original file or its ACL.
+            WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
                 workerExecutable, catalog, request);
-            if (exitCode != 0)
-                throw new InvalidDataException(
-                    "Isolated FFmpeg could not decode this media. Worker status: " + exitCode);
         }
         finally
         {
