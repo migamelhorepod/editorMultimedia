@@ -19,22 +19,46 @@ if ($LASTEXITCODE -ne 0) { throw "Falha na publicação self-contained do worker
 $worker = Join-Path $bundle "Editor.Security.Worker.exe"
 if (-not (Test-Path $worker)) { throw "O publish não produziu o executável AppContainer." }
 
-$ffmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-$ffprobe = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
-if (-not $ffmpeg -or -not $ffprobe) {
-    throw "Instale os executáveis estáveis FFmpeg e ffprobe versão 9.x no PATH antes de preparar o worker. Não será usada uma versão beta nem feita instalação automática."
+# Prefer the actual paired binaries, not Chocolatey's PATH shims.
+# A shim can execute successfully during packaging but fail inside AppContainer
+# because its external Chocolatey installation target is inaccessible.
+$pair = $null
+$chocoTools = Join-Path $env:ProgramData "chocolatey\lib\ffmpeg\tools"
+if (Test-Path $chocoTools) {
+    $pair = Get-ChildItem $chocoTools -Filter ffprobe.exe -File -Recurse |
+        Where-Object { Test-Path (Join-Path $_.DirectoryName "ffmpeg.exe") } |
+        Select-Object -First 1
+}
+if ($pair) {
+    $codecDir = $pair.DirectoryName
+} else {
+    $ffmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+    $ffprobe = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
+    if (-not $ffmpeg -or -not $ffprobe) {
+        throw "Instale FFmpeg e ffprobe estáveis 9.x antes de preparar o worker."
+    }
+    if ($ffmpeg.Source -match '[\\/]chocolatey[\\/]bin[\\/]' -or
+        $ffprobe.Source -match '[\\/]chocolatey[\\/]bin[\\/]') {
+        throw "Não copie executáveis intermediários do Chocolatey. Localize os binários reais em uma mesma pasta."
+    }
+    $codecDir = Split-Path -Parent $ffprobe.Source
+    if (-not (Test-Path (Join-Path $codecDir "ffmpeg.exe"))) {
+        throw "FFmpeg e ffprobe reais devem estar juntos na mesma pasta."
+    }
 }
 
-foreach ($tool in @($ffmpeg.Source, $ffprobe.Source)) {
-    $name = [IO.Path]::GetFileNameWithoutExtension($tool)
+foreach ($name in @("ffmpeg", "ffprobe")) {
+    $tool = Join-Path $codecDir ($name + ".exe")
     $banner = & $tool -version | Select-Object -First 1
     if ($LASTEXITCODE -ne 0 -or $banner -notmatch 'version\s+9\.[0-9]+') {
         throw "$name deve ser versão estável 9.x: $banner"
     }
+    Copy-Item $tool (Join-Path $bundle ($name + ".exe")) -Force
+    if ((Get-Item (Join-Path $bundle ($name + ".exe"))).Length -ne (Get-Item $tool).Length) {
+        throw "Falha ao copiar o binário real de $name."
+    }
 }
-
-Copy-Item $ffmpeg.Source (Join-Path $bundle "ffmpeg.exe") -Force
-Copy-Item $ffprobe.Source (Join-Path $bundle "ffprobe.exe") -Force
+Write-Host "Ferramentas reais copiadas do mesmo diretório: $codecDir"
 # Windows must authorize the exact AppContainer package identity to read and
 # execute this bundle. Never grant Everyone, Users or all AppContainers.
 Add-Type -TypeDefinition @'
