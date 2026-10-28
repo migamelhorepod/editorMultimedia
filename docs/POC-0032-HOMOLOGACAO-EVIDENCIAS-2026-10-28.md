@@ -39,3 +39,11 @@ Data 28/10/2026. Branch `feature/poc003-2-revogacao-recuperacao`; PR #8 permanec
 - Auditar CVEs e obrigações da distribuição nativa GPLv3 de FFmpeg antes de empacotar aplicativo.
 
 **Decisão:** pesquisa técnica do FD seekable demonstrada em runner Windows no CI #716; homologação de produção, release e fechamento da POC-003.2 permanecem pendentes até todos os gates serem comprovados.
+## Incremento adicional: integração da consulta de duração
+
+- `IsolatedMediaProcessingService.InspectDurationTicks(registeredMediaPath)` passou a usar `WindowsAppContainerLauncher.ProbeAuthorizedSeekableMetadataTicks`, isto é, consulta real FFprobe com identificador de leitura de arquivo autorizado, **sem staging integral**. Entrada: caminho cadastrado na biblioteca ativa; retorno: duração em ticks de 100 ns; falhas: grant/identidade inválidos, FFprobe sem metadados, IPC sem resposta autenticada ou limite de tempo.
+- `WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(workerExecutable, catalog, request)` adicionou prova isolada de decodificação real por FFmpeg com grant `ReadChunk`; recebe worker/catálogo/requisição, retorna sem dados exportados após confirmação de IPC ou falha fechada se codec/token/identidade inválidos. O caminho legado `IsolatedMediaProcessingService.DecodeToNull` **ainda usa staging** até a prova de decodificação e regressão da integração passar.
+- `WindowsInheritedHandleFfprobe.DecodeToNullAsync` chama o FFmpeg estável com stdin herdado seekable e saída nula, com limite total compatível com a política de até cinco minutos do launcher para disco convencional. Nenhum pacote de terceiros novo foi acrescentado; a implementação usa APIs Win32 e `AnonymousPipeServerStream` do .NET já presente.
+- O gate de pesquisa `tests/security/assert-poc0032-fd-research-gate.ps1` exige provas BDD de WAV/MP4, revogação, identidade contra substituição, decodificação real e auditoria de vulnerabilidades; reporta `readyForProduction=false` e `readyForDistribution=false` independentemente de seu próprio sucesso.
+
+**Importante:** esse incremento não equivale à integração da UI WPF ou à homologação de arquivos de 10 GB no HD físico. A produção geral continua bloqueada pela política fail-closed.
