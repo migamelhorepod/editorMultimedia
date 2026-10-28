@@ -19,7 +19,7 @@ internal static class WindowsInheritedHandleFfprobe
         return await RunWithInheritedInputAsync(ffprobe,
             "-v error -protocol_whitelist fd -i fd: " +
             "-show_entries format=duration -of default=noprint_wrappers=1",
-            15000, cancellationToken);
+            240000, cancellationToken);
     }
 
     /// <summary>
@@ -32,7 +32,7 @@ internal static class WindowsInheritedHandleFfprobe
     {
         var result = await RunWithInheritedInputAsync(ffmpeg,
             "-nostdin -v error -protocol_whitelist fd -i fd: -f null -",
-            30000, cancellationToken);
+            240000, cancellationToken);
         return result.ExitCode;
     }
 
