@@ -201,7 +201,7 @@ internal sealed class WindowsScopedCodecInput : IDisposable
         if (!name.StartsWith(stem, StringComparison.Ordinal)) return false;
         string extension = name[stem.Length..];
         return extension.Length == 0 ||
-            (extension.StartsWith('.', StringComparison.Ordinal) &&
+            (extension[0] == '.' &&
              extension.IndexOf('.', 1) < 0);
     }
 
