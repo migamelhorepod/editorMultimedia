@@ -55,6 +55,10 @@ internal sealed class WindowsScopedCodecInput : IDisposable
             // An app/process crash closes it, enabling next-start recovery.
             lease = new FileStream(leasePath, FileMode.CreateNew, FileAccess.ReadWrite,
                 FileShare.None, 4096, FileOptions.WriteThrough);
+            byte[] leaseProof = System.Text.Encoding.ASCII.GetBytes(
+                LeaseProof(Guid.ParseExact(identity, "N")));
+            lease.Write(leaseProof);
+            lease.Flush(flushToDisk: true);
             using (var input = new FileStream(source, FileMode.Open, FileAccess.Read,
                 FileShare.Read, 1024 * 1024, FileOptions.SequentialScan))
             using (var output = new FileStream(stage, FileMode.CreateNew, FileAccess.Write,
@@ -163,6 +167,16 @@ internal sealed class WindowsScopedCodecInput : IDisposable
                 }
                 using (exclusive)
                 {
+                    string expectedProof = LeaseProof(id);
+                    // A GUID-shaped filename alone must never authorize
+                    // deleting what might be a user-created file.
+                    if (exclusive.Length != expectedProof.Length)
+                        continue;
+                    using (var reader = new StreamReader(exclusive,
+                               System.Text.Encoding.ASCII, false, 256, leaveOpen: true))
+                        if (!string.Equals(reader.ReadToEnd(), expectedProof,
+                                StringComparison.Ordinal))
+                            continue;
                     string stem = Prefix + id.ToString("N") + InputPart;
                     var candidates = Directory.EnumerateFiles(folder, stem + "*",
                             SearchOption.TopDirectoryOnly)
@@ -186,6 +200,9 @@ internal sealed class WindowsScopedCodecInput : IDisposable
         }
         return recovered;
     }
+
+    private static string LeaseProof(Guid id) =>
+        "MigaMelhore.EditorMultimedia.AppContainerStage.v1|" + id.ToString("N");
 
     private static bool TryLeaseIdentity(string name, out Guid id)
     {
