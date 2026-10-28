@@ -45,6 +45,6 @@ public sealed class WpfPackagedWorkerTests
             Assert.Empty(Directory.GetFiles(folder, ".editorworker-*"));
             Assert.True(File.Exists(wav));
         }
-        finally { Directory.Delete(folder, true); }
+        finally { WindowsMediaFixtureCleanup.Remove(folder); }
     }
 }
