@@ -29,3 +29,33 @@ O processamento de mídias de até 10 GB deve acontecer dentro de um worker AppC
 - Testes físicos com mídias de vários GB no Windows 11 e HD convencional D: antes da homologação de 10 GB.
 
 **Regra:** não declarar POC-003.2 concluída, não ativar processamento genérico e não permitir fallback fora do AppContainer até existir execução validada.
+## Decisão de implementação refinada — MIG-7 (28/10/2026)
+
+**Escolha condicional:** adotar um adaptador de entrada *read-only* com seek aleatório, cuja autorização nasce de um HANDLE Win32 aberto pelo processo controlador para **um único arquivo regular**. O HANDLE deve ser transferido ao worker identificado por PID, jamais enviado a um processo arbitrário. No worker, um adaptador de codec deve mapear o recurso concedido a um descritor ou AVIOContext que suporte `read` e `seek`. O FFprobe/FFmpeg continua dentro da identidade AppContainer, sem autorização de caminho original nem expansão das ACLs da biblioteca.
+
+### Contrato e interfaces propostas
+
+- **Controlador/serviço de arquivos:** valida biblioteca ativa, caminho canônico, volume e identidade física do arquivo, rejeita pontos de reanálise; abre HANDLE de leitura somente com compartilhamento controlado, vinculado à tarefa, ao PID e à operação.
+- **Canal de concessão:** entrega exclusivamente capacidade de leitura daquele arquivo, com tempo de vida associado ao Job Object. Nunca transmite um caminho que o worker possa reabrir e nunca torna o HANDLE globalmente herdável.
+- **Adaptador no worker:** consome apenas a capacidade concedida e faz operações de leitura/seek com limites de posição e overflow, retornando erros fechados. Para `fd:`, exige prova de conversão real do HANDLE para um descritor CRT **válido naquele processo**; alternativamente, usar AVIO customizado no mesmo sandbox, com código e dependências auditados.
+- **Revogação:** revogar nova autorização impede novos leitores; para revogar uma leitura já em curso, encerrar o Job/processo e fechar as referências de HANDLE. Não prometer revogação instantânea apenas ao remover um registro de permissão.
+- **Proibições:** cópia integral proporcional a 10 GB, fallback externo ao AppContainer, ampliar ACL do original, abrir diretório inteiro, rede do worker, shell/comando arbitrário e declarar sucesso apenas pelo código de saída do processo.
+
+### Alternativas descartadas ou não comprovadas
+
+| Alternativa | Resultado | Motivo |
+|---|---|---|
+| `handle:` no FFmpeg 9.0.2 do runner | **Descartada no build testado** | Protocolo indisponível, falha fechada comprovada no empacotamento |
+| Encaminhar HANDLE Win32 bruto como `fd:` | **Proibida sem adaptador** | HANDLE do kernel não equivale a `fd` da CRT |
+| Alimentar `pipe:0` sem seek | **Insuficiente** | MP4 com índice `moov` no fim depende de leitura aleatória |
+| Copiar mídia inteira para staging | **Temporária, não satisfaz a POC** | Consome espaço e I/O proporcional a mídias de 10 GB |
+| AVIO customizado em worker isolado | **Alternativa admissível** | Exige implementação C/native auditada, integração a FFprobe/FFmpeg e testes reais |
+
+### Gate BDD obrigatório (SEC-01 / MIG-12)
+
+- **Dado** um WAV/MP4 autorizado, inclusive MP4 com `moov` no final, **quando** FFprobe/FFmpeg executam no AppContainer, **então** leitura e busca aleatória funcionam sem copiar a mídia integral, sem abrir o original por caminho e com prova de identidade do token.
+- **Dado** um arquivo fora da biblioteca ativa, reparse point ou HANDLE alterado, **quando** o controlador tenta conceder acesso, **então** a operação é negada sem tocar nas ACLs do arquivo.
+- **Dado** um processamento em andamento, **quando** ocorre revogação/encerramento, **então** o Job termina, seus descritores são fechados e não permanece subprocesso órfão.
+- **Dado** arquivo até 10 GB em Windows 11 com HD convencional, **quando** metadados/decodificação são realizados, **então** medimos I/O, seek, CPU, RAM e demonstramos ausência de cópia proporcional ao tamanho da entrada.
+
+**Limite do aceite MIG-7:** a decisão técnica e o contrato acima ficam documentados. A viabilidade efetiva de `fd:`/AVIO e a homologação da execução pertencem à MIG-12 e sucessoras; esta ADR não prova nem autoriza ativação do processamento genérico.
