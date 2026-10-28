@@ -69,3 +69,10 @@ Script: `tests/security/homologate-physical-d.ps1` (commit `ebb5870`). **Não fo
 - Não instalar automaticamente código de branch de desenvolvimento, release candidate ou executável não auditado para 'resolver' CVE. Continuar bloqueio fail-closed, rever correção upstream assinada e hash/termos de redistribuição quando surgir build estável verificável. A prova do worker é válida apenas para a distribuição exata testada e não equivale à mitigação de todas as entradas hostis.
 
 **Resultado de homologação física:** não executada; aguarda evidência gerada no Windows 11 local com volume D: e testes até 10 GiB. `MediaWorkerAdmission.IsMediaProcessingAvailable` permanece false.
+
+## Fechamento da regressão CI #767
+
+- A execução #767 falhou em `AppContainerStageRecoveryTests.Given64MiBRegisteredWav_WhenRealFfprobeInspects_ThenOriginalRemainsAndStagingIsClean`: o Win32 ainda liberava o HANDLE da fixture durante a exclusão do diretório.
+- Corrigido somente o cleanup em `AppContainerStageRecoveryTests.cs` usando `WindowsMediaFixtureCleanup.Remove` (retries limitados com erro permanente não mascarado), commit `c33663d`.
+- **Pipeline #771 (40746702396): todos os jobs SUCCESS** — `build-test`, `Security release gate POC-003.1` e `Seekable FD research gate POC-003.2`. O requisito **específico** do adaptador seekable MIG-12 passou no Windows runner e foi marcado Done no Linear.
+- **Limites preservados:** produção geral continua bloqueada (`MediaWorkerAdmission=false`); FFmpeg 9.0.2 apresenta CVEs nativas conhecidas; distribuição GPL e homologação física Win11/HD D: com até 10 GiB ainda não foram realizadas. Não marcar POC-003.2 ou MIG-91 como concluídas.
