@@ -60,4 +60,36 @@ public sealed class WorkerIpcCompletionPolicyTests
             WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(
                 pending.Task, 0, TimeSpan.Zero));
     }
+    [Fact]
+    public void GivenWorkerExitedWithCode77AndFaultedIpc_WhenControllerChecks_ThenIpcFailureIsNotHidden()
+    {
+        var rejected = Task.FromException<WorkerResponse>(
+            new UnauthorizedAccessException("Foreign PID rejected"));
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(rejected, 77));
+    }
+
+    [Fact]
+    public void GivenWorkerExitedWithZeroAndIpcWasCanceled_WhenControllerChecks_ThenItNeverReportsSuccess()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var task = Task.FromCanceled<WorkerResponse>(cancelled.Token);
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(task, 0));
+    }
+
+    [Fact]
+    public void GivenWorkerExitedWithNonZeroAndIpcIsPending_WhenControllerChecks_ThenItDoesNotWaitForGracePeriod()
+    {
+        var pending = new TaskCompletionSource<WorkerResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Throws<InvalidOperationException>(() =>
+            WorkerIpcCompletionPolicy.RequireAuthenticatedResponse(
+                pending.Task, 77, TimeSpan.FromSeconds(5)));
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(2),
+            "Non-zero exit must not stall for the post-exit grace period.");
+    }
+
 }
