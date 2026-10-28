@@ -196,3 +196,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           path: TestResults/poc0031-gate.json
+
+  poc0032-fd-research-evidence:
+    name: Seekable FD research gate — POC-003.2 (not production approval)
+    needs: build-test
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Recuperar TRX e auditoria de dependencias
+        uses: actions/download-artifact@v6
+        with:
+          name: resultados-testes
+          path: .
+      - name: Validar provas reais do adaptador seekable
+        shell: pwsh
+        run: ./tests/security/assert-poc0032-fd-research-gate.ps1
+      - name: Publicar gate experimental auditavel
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: poc0032-fd-research-gate
+          if-no-files-found: warn
+          retention-days: 14
+          path: TestResults/poc0032-fd-research-gate.json
