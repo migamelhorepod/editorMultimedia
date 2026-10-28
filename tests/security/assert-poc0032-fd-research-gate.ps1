@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $requiredTests = @(
     "GivenAuthorizedWavWithoutSourceAclChange_WhenFdProbeRuns_ThenItReadsMetadataWithoutStaging",
     "GivenMp4WithMoovAfterMdat_WhenFdProbeSeeks_ThenItReadsMetadataWithoutStaging",
+    "GivenAuthorizedWav_WhenFfmpegDecodesFdInSandbox_ThenNoStageAndSourceIsUnchanged",
     "GivenRevokedGrant_WhenFdProbeIsRequested_ThenNoWorkerGetsAnInputHandle",
     "GivenRegisteredMediaWasReplacedByAnotherFileAtSamePath_WhenGrantedHandleIsRequested_ThenItFailsClosed"
 )
