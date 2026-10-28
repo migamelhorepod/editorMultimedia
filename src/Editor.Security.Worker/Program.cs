@@ -93,7 +93,8 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 // Windows PROC_THREAD_ATTRIBUTE_HANDLE_LIST. No pathname or ACL grant to the
 // original media is ever delivered to this worker or its codec child.
 // FFmpeg's Windows handle: protocol supports seeking, unlike pipe:0.
-if ((args.Length == 2 && args[0] == "--process-decode-handle") ||
+if ((args.Length == 2 && (args[0] == "--process-decode-handle" ||
+                          args[0] == "--process-metadata-handle")) ||
     (args.Length == 4 && (args[0] == "--process-metadata-handle" ||
                           args[0] == "--probe-held-decode-handle")))
 {
@@ -188,11 +189,14 @@ if ((args.Length == 2 && args[0] == "--process-decode-handle") ||
                 !double.IsFinite(duration) || duration <= 0 || duration > 604800)
                 return 79;
             long ticks = checked((long)Math.Round(duration * TimeSpan.TicksPerSecond));
-            using var reportDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-            await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[2],
+            if (args.Length == 4)
+            {
+                using var reportDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[2],
                 new WindowsWorkerMetadataPipe.MetadataReport(
                     WorkerRequest.CurrentVersion,
                     Guid.ParseExact(args[3], "N"), ticks), reportDeadline.Token);
+            }
         }
         return 0;
     }
