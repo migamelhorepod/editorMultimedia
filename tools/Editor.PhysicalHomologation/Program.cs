@@ -223,21 +223,21 @@ internal static class Program
                     try
                     {
                         var probeTimer = Stopwatch.StartNew();
-                    long durationTicks = isolated.InspectDurationTicks(fixture);
-                    probeTimer.Stop();
-                    report["fixtureMetadataDurationTicks"] = durationTicks;
-                    report["fixtureMetadataElapsedSeconds"] =
-                        Math.Round(probeTimer.Elapsed.TotalSeconds, 3);
-                    var decodeTimer = Stopwatch.StartNew();
-                    isolated.DecodeToNull(fixture);
-                    decodeTimer.Stop();
-                    report["fixtureDecodeElapsedSeconds"] =
-                        Math.Round(decodeTimer.Elapsed.TotalSeconds, 3);
-                    // A 8 kHz, 8-bit mono WAV has one sample per byte.
-                    long expected = checked(mediaMiB * MiB * TimeSpan.TicksPerSecond / 8000);
-                    long tolerance = TimeSpan.FromMilliseconds(250).Ticks;
-                    directFixturePassed = durationTicks > 0 &&
-                        Math.Abs(durationTicks - expected) <= tolerance;
+                        long durationTicks = isolated.InspectDurationTicks(fixture);
+                        probeTimer.Stop();
+                        report["fixtureMetadataDurationTicks"] = durationTicks;
+                        report["fixtureMetadataElapsedSeconds"] =
+                            Math.Round(probeTimer.Elapsed.TotalSeconds, 3);
+                        var decodeTimer = Stopwatch.StartNew();
+                        isolated.DecodeToNull(fixture);
+                        decodeTimer.Stop();
+                        report["fixtureDecodeElapsedSeconds"] =
+                            Math.Round(decodeTimer.Elapsed.TotalSeconds, 3);
+                        // A 8 kHz, 8-bit mono WAV has one sample per byte.
+                        long expected = checked(mediaMiB * MiB * TimeSpan.TicksPerSecond / 8000);
+                        long tolerance = TimeSpan.FromMilliseconds(250).Ticks;
+                        directFixturePassed = durationTicks > 0 &&
+                            Math.Abs(durationTicks - expected) <= tolerance;
                         report["fixtureDirectAppContainerPassed"] = directFixturePassed;
                     }
                     finally
