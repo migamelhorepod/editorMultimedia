@@ -32,3 +32,21 @@ Data: 28/10/2026. Fonte: manifestos e workflow da branch `feature/poc003-2-revog
 - Não há benchmark físico de I/O/CPU/RAM na máquina de referência; não inferir a partir de GitHub Actions.
 
 **Aceite BDD:** Dado o inventário de dependências, quando um componente é atualizado, então a mudança exige versão suportada, licença, segurança, origem verificável, testes e justificativa documentados.
+
+## Revisão de fontes oficiais e CVEs nativas em 28/10/2026
+
+- .NET 10 LTS: política oficial da Microsoft https://dotnet.microsoft.com/en-us/platform/support/policy; compatível com o alvo Windows 11 e `net10.0-windows` do WPF.
+- Node.js 24 LTS: tabela de versões oficiais https://nodejs.org/en/about/previous-releases; é apenas a runtime de testes, não do editor distribuído.
+- FFmpeg 9.0.2: última versão estável 9.0 publicada em setembro de 2026 na página oficial https://ffmpeg.org/download.html; o pacote do runner identifica `ffmpeg version 9.0.2-essentials_build-www.gyan.dev`.
+- **CVE-2026-107678:** NVD declara FFmpeg até 9.0.2 vulnerável à entrada MP4 manipulada que pode provocar pilha/CPU exauridas. https://nvd.nist.gov/vuln/detail/CVE-2026-107678
+- **CVE-2026-107696:** NVD declara FFmpeg até 9.0.2 vulnerável a loop RTSP; AppContainer sem rede reduz superfície, mas não corrige a vulnerabilidade. https://nvd.nist.gov/vuln/detail/CVE-2026-107696
+- O build real contém `--enable-gpl --enable-version3 --enable-static`; exige análise GPLv3 antes de qualquer distribuição. Inventário/licenças/hashes e evidências do CI #712 em `docs/MIG-91-RESULTADO-AUDITORIA-2026-10-28.md`.
+
+### Plano de atualização verificável
+
+1. **Manter a produção bloqueada** (`MediaWorkerAdmission=false`) enquanto FFmpeg 9.0.2 apresentar CVEs aplicáveis ao processamento de MP4 e a redistribuição GPL não estiver revisada.
+2. Selecionar compilação estável com patches comprovados para os CVEs relevantes, origem oficial/verificável, hash SHA-256 comparável e licença compatível com a distribuição planejada; não supor que trocar apenas o número da versão resolve.
+3. Atualizar binários no bundle AppContainer mantendo o protocolo `fd:` seekable, e executar CI completo (WAV/MP4, decode, PID/IPC, rede, integridade e recuperação).
+4. Validar em Windows 11 no HD D: antes de liberar produção. Atualizações de .NET/Node/Playwright/TypeScript devem passar em testes de compatibilidade e revisão de releases oficiais.
+
+**Resultado da MIG-11:** inventário e política revisados; riscos de CVEs/licença nativos identificados e direcionados à MIG-91 (remediação). Conclusão da auditoria não é homologação de distribuição.
