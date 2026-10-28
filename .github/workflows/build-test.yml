@@ -27,6 +27,9 @@ jobs:
       - name: Compilar todos os projetos (inclui WPF)
         run: dotnet build EditorMultimidia.sln --configuration Release --no-restore
 
+      - name: Compilar ferramenta CMD de homologacao fisica Win11 D
+        run: dotnet build tools/Editor.PhysicalHomologation/Editor.PhysicalHomologation.csproj --configuration Release
+
       - name: Preparar FFmpeg e ffprobe reais
         shell: pwsh
         run: |
