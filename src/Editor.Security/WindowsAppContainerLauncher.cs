@@ -283,7 +283,7 @@ public static class WindowsAppContainerLauncher
             "--probe-fd-metadata " + pipe.Name + " " + request.RequestId.ToString("N"),
             true, async pid =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(270));
                 ticks = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
                 return new WorkerResponse(WorkerRequest.CurrentVersion,
                     request.RequestId, AccessDecision.Allowed);
@@ -323,7 +323,7 @@ public static class WindowsAppContainerLauncher
             "--probe-fd-decode " + pipe.Name + " " + request.RequestId.ToString("N"),
             true, async pid =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(270));
                 proof = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
                 return new WorkerResponse(WorkerRequest.CurrentVersion,
                     request.RequestId, AccessDecision.Allowed);
