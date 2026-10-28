@@ -345,13 +345,13 @@ internal static class Program
             FileAccess.Write, FileShare.None);
         using var writer = new BinaryWriter(file);
         writer.Write(Encoding.ASCII.GetBytes("RIFF"));
-        writer.Write(checked((int)(length + 36)));
+        writer.Write(checked((uint)(length + 36)));
         writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
         writer.Write(16); writer.Write((short)1); writer.Write((short)1);
         writer.Write(8000); writer.Write(8000);
         writer.Write((short)1); writer.Write((short)8);
         writer.Write(Encoding.ASCII.GetBytes("data"));
-        writer.Write(checked((int)length));
+        writer.Write(checked((uint)length));
         byte[] buffer = new byte[1024 * 1024];
         Array.Fill(buffer, (byte)128);
         while (length > 0)
