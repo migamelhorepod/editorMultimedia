@@ -87,4 +87,36 @@ public sealed class AppContainerRealMetadataTests
         }
         finally { Directory.Delete(folder, true); }
     }
+    [Fact]
+    public void GivenMalformedRegisteredMedia_WhenSandboxedFfprobeRuns_ThenItFailsClosedAndPreservesOriginal()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        string worker = Path.Combine(root, "TestResults", "sandbox-worker",
+            "Editor.Security.Worker.exe");
+        Assert.True(File.Exists(worker));
+        string folder = Path.Combine(Path.GetTempPath(),
+            "editor-malformed-media-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string media = Path.Combine(folder, "malformed.wav");
+            byte[] original = System.Text.Encoding.ASCII.GetBytes(
+                "not a valid WAV, MP4 or decodable media file");
+            File.WriteAllBytes(media, original);
+            var service = new IsolatedMediaProcessingService(folder, Guid.NewGuid(), worker);
+            Assert.ThrowsAny<Exception>(() => service.InspectDurationTicks(media));
+            Assert.Throws<InvalidDataException>(() => service.DecodeToNull(media));
+            Assert.Equal(original, File.ReadAllBytes(media));
+            Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
+            service.RevokeAll();
+            Assert.ThrowsAny<Exception>(() => service.InspectDurationTicks(media));
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
 }
