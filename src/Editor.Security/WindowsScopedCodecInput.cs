@@ -141,7 +141,7 @@ internal sealed class WindowsScopedCodecInput : IDisposable
         int recovered = 0;
         var pending = new Stack<string>();
         pending.Push(root);
-        while (pending.TryPop(out string? folder))
+        while (pending.TryPop(out string folder))
         {
             foreach (string marker in Directory.EnumerateFiles(folder,
                          Prefix + "*" + LeasePart, SearchOption.TopDirectoryOnly))
