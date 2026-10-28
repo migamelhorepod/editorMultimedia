@@ -46,7 +46,7 @@ public sealed class IsolatedMediaProcessingService
         {
             catalog.Register(resource, registeredMediaPath);
             Guid grant = grants.Issue(task, grants.ActiveLibraryId, resource,
-                MediaAccessOperation.InspectMetadata, TimeSpan.FromMinutes(15));
+                MediaAccessOperation.InspectMetadata, AccessGrantRegistry.MaxGrantLifetime);
             var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
                 task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.InspectMetadata);
             return WindowsAppContainerLauncher.ReadAuthorizedMetadataTicks(
@@ -66,7 +66,7 @@ public sealed class IsolatedMediaProcessingService
         {
             catalog.Register(resource, registeredMediaPath);
             Guid grant = grants.Issue(task, grants.ActiveLibraryId, resource,
-                MediaAccessOperation.ReadChunk, TimeSpan.FromMinutes(15));
+                MediaAccessOperation.ReadChunk, AccessGrantRegistry.MaxGrantLifetime);
             var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
                 task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.ReadChunk);
             int exitCode = WindowsAppContainerLauncher.RunAuthorizedDecodeProcessing(
