@@ -293,6 +293,45 @@ public static class WindowsAppContainerLauncher
         return ticks;
     }
 
+    /// <summary>
+    /// Research-only decode-to-null using real FFmpeg in a verified AppContainer.
+    /// A single ReadChunk grant opens one read-only seekable source HANDLE.
+    /// No original path, staged copy or user output is passed to the worker.
+    /// </summary>
+    public static void ProbeAuthorizedSeekableDecode(
+        string workerExecutable, AuthorizedMediaCatalog catalog, WorkerRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (request.Operation != MediaAccessOperation.ReadChunk)
+            throw new UnauthorizedAccessException("Decode requires ReadChunk authorization.");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (!string.Equals(Path.GetFileName(workerExecutable), "Editor.Security.Worker.exe",
+                StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Unexpected worker executable.");
+        string source = catalog.Resolve(request);
+        using var input = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 4096, FileOptions.RandomAccess);
+        if (input.Length <= 0 || input.Length > 10L * 1024 * 1024 * 1024)
+            throw new IOException("Invalid input length for isolated decode.");
+        VerifyOpenedInputPath(input.SafeFileHandle.DangerousGetHandle(), source);
+        catalog.ValidateOpenedHandle(request, input.SafeFileHandle);
+        if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Media grant revoked before decoder launch.");
+        var pipe = new WindowsWorkerMetadataPipe();
+        long proof = 0;
+        int exit = LaunchDiagnostic(workerExecutable,
+            "--probe-fd-decode " + pipe.Name + " " + request.RequestId.ToString("N"),
+            true, async pid =>
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                proof = await pipe.ReceiveOnceAsync(pid, request.RequestId, deadline.Token);
+                return new WorkerResponse(WorkerRequest.CurrentVersion,
+                    request.RequestId, AccessDecision.Allowed);
+            }, inheritedMediaInput: input.SafeFileHandle.DangerousGetHandle());
+        if (exit != 0 || proof != 1)
+            throw new InvalidDataException("Authenticated seekable FFmpeg decode proof failed.");
+    }
+
     private static int LaunchDiagnostic(string executable, string arguments, bool run,
         Func<int, Task<WorkerResponse>>? authenticatedServer = null,
         Action<int>? processVerified = null, string? profileName = null,
@@ -331,7 +370,8 @@ public static class WindowsAppContainerLauncher
             arguments.EndsWith(((char)34).ToString(), StringComparison.Ordinal) && run;
         var isFdProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
-            arguments.StartsWith("--probe-fd-metadata editor-poc003-", StringComparison.Ordinal) &&
+            (arguments.StartsWith("--probe-fd-metadata editor-poc003-", StringComparison.Ordinal) ||
+             arguments.StartsWith("--probe-fd-decode editor-poc003-", StringComparison.Ordinal)) &&
             inheritedMediaInput != IntPtr.Zero && authenticatedServer is not null && run;
         var isForeignProbe = string.Equals(Path.GetFileName(executable),
             "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) &&
