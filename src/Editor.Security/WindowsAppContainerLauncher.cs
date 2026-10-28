@@ -270,6 +270,10 @@ public static class WindowsAppContainerLauncher
             FileShare.Read, 4096, FileOptions.RandomAccess);
         if (input.Length <= 0 || input.Length > 10L * 1024 * 1024 * 1024)
             throw new IOException("Invalid authorized media input length.");
+        // The path may be replaced between authorization and CreateFile.
+        // Compare the kernel-resolved path of the OPEN HANDLE to the approved
+        // path, not merely the same string re-resolved by the catalog.
+        VerifyOpenedInputPath(input.SafeFileHandle.DangerousGetHandle(), source);
         if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Media grant changed before probe.");
         var pipe = new WindowsWorkerMetadataPipe();
@@ -556,6 +560,25 @@ public static class WindowsAppContainerLauncher
         }
     }
 
+    private static void VerifyOpenedInputPath(IntPtr openedHandle, string approvedPath)
+    {
+        var buffer = new System.Text.StringBuilder(32768);
+        uint length = GetFinalPathNameByHandleW(openedHandle, buffer,
+            checked((uint)buffer.Capacity), 0);
+        if (length == 0 || length >= buffer.Capacity)
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                "Cannot verify opened media file identity.");
+        string actual = buffer.ToString();
+        if (actual.StartsWith(@"\\?\", StringComparison.Ordinal))
+            actual = actual[4..];
+        // Strictly disallow paths that cannot be compared after NT prefix
+        // normalization (e.g. unexpected device/UNC path forms).
+        if (!string.Equals(Path.GetFullPath(actual), Path.GetFullPath(approvedPath),
+                StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                "Opened media handle points to a different filesystem target.");
+    }
+
     private static int ConvertNativeExitCode(uint nativeCode) => unchecked((int)nativeCode);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -629,6 +652,9 @@ public static class WindowsAppContainerLauncher
     private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
     [DllImport("kernel32.dll")]
     private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(IntPtr file, 
+        System.Text.StringBuilder path, uint chars, uint flags);
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)]
