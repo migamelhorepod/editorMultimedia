@@ -6,11 +6,12 @@ namespace Editor.Timeline.Tests;
 public sealed class MediaWorkerAdmissionTests
 {
     [Fact]
-    public void MediaWorkerRemainsDisabledUntilOsSandboxIsImplemented()
+    public void GivenSandboxProvenButProductionIntegrationPending_WhenAdmittingMedia_ThenItFailsClosed()
     {
         Assert.False(MediaWorkerAdmission.IsMediaProcessingAvailable);
         var error = Assert.Throws<UnauthorizedAccessException>(
             MediaWorkerAdmission.DemandMediaProcessing);
+        Assert.Contains("POC-003.2", error.Message);
         Assert.Contains("No unrestricted fallback", error.Message);
     }
 
