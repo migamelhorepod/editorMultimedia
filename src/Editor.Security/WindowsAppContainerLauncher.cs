@@ -194,8 +194,17 @@ public static class WindowsAppContainerLauncher
                 "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Only the isolated media worker is permitted.");
         string source = catalog.Resolve(request);
-        using SafeFileHandle opened = File.OpenHandle(source, FileMode.Open,
-            FileAccess.Read, FileShare.Read, FileOptions.OpenReparsePoint);
+        // Open the object itself, never follow a last-component reparse point.
+        // GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, OPEN_REPARSE_POINT.
+        using SafeFileHandle opened = CreateReadOnlyMediaHandle(source, 0x80000000u,
+            0x00000001u, IntPtr.Zero, 3u, 0x00200000u | 0x10000000u,
+            IntPtr.Zero);
+        if (opened.IsInvalid)
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                "Cannot open only the authorized original media.");
+        if (!GetFileInformationByHandle(opened, out var sourceInfo) ||
+            (sourceInfo.Attributes & (uint)FileAttributes.ReparsePoint) != 0)
+            throw new UnauthorizedAccessException("A redirected media file handle is not permitted.");
         long length = RandomAccess.GetLength(opened);
         if (length <= 0 || length > 10L * 1024 * 1024 * 1024)
             throw new IOException("Authorized media exceeds the bounded input size.");
@@ -557,6 +566,28 @@ public static class WindowsAppContainerLauncher
     [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "GetTokenInformation")]
     private static extern bool GetTokenInformationBuffer(IntPtr token, int informationClass,
         IntPtr information, int length, out int returnLength);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION
+    {
+        public uint Attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW",
+        CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateReadOnlyMediaHandle(
+        string name, uint access, uint share, IntPtr security,
+        uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION fileInformation);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle,
         IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess,
