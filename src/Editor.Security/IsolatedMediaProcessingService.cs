@@ -75,8 +75,22 @@ public sealed class IsolatedMediaProcessingService
             // Real Windows CI proved the isolated FFmpeg null-sink decoder
             // consumes only an authorized seekable HANDLE, with no full-sized
             // staging copy and no changes to the original file or its ACL.
-            WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
-                workerExecutable, catalog, request);
+            try
+            {
+                WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
+                    workerExecutable, catalog, request);
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message.StartsWith("AppContainer worker exited with status ",
+                    StringComparison.Ordinal))
+            {
+                // Preserve the service contract for undecodable media:
+                // codec exit codes are errors in the input, never proof of
+                // authenticated success. The original IPC failure remains
+                // available as InnerException for diagnosis.
+                throw new InvalidDataException(
+                    "Isolated FFmpeg rejected the media. " + ex.Message, ex);
+            }
         }
         finally
         {
