@@ -59,3 +59,11 @@ O processamento de mídias de até 10 GB deve acontecer dentro de um worker AppC
 - **Dado** arquivo até 10 GB em Windows 11 com HD convencional, **quando** metadados/decodificação são realizados, **então** medimos I/O, seek, CPU, RAM e demonstramos ausência de cópia proporcional ao tamanho da entrada.
 
 **Limite do aceite MIG-7:** a decisão técnica e o contrato acima ficam documentados. A viabilidade efetiva de `fd:`/AVIO e a homologação da execução pertencem à MIG-12 e sucessoras; esta ADR não prova nem autoriza ativação do processamento genérico.
+
+## Análise de implementação — MIG-12 (28/10/2026)
+
+Inspeção do código existente: `WindowsAppContainerLauncher.RunAuthorizedMetadataProcessing`, `ReadAuthorizedMetadataTicks`, `RunAuthorizedDecodeProcessing` e `RunAuthorizedInterruptedDecodeProbe` ainda criam `WindowsScopedCodecInput`, isto é, cópia integral temporária. O worker `Program.cs` inicia FFprobe/FFmpeg com `-i <caminho da cópia>`. Assim, **o teste real atual prova isolamento de uma cópia, não prova leitura direta do arquivo original sem cópia**. Nenhum teste desta branch autoriza marcar MIG-12 como concluída.
+
+A primeira implementação segura precisa entregar uma capacidade de arquivo ao worker sem expor caminho de origem. O FFmpeg executado como subprocesso **não** recebe automaticamente o HANDLE pertencente ao processo .NET: é necessário duplicar para o PID do subprocesso, criar descritor CRT válido nesse processo ou integrar AVIO nativo, e comprovar seek. Passar o valor numérico do HANDLE via argumento `fd:` não é correto e pode gerar falha de isolamento.
+
+Critérios adicionais de homologação: criar fixture MP4 com `moov` ao final; comparar duração e seek; medir bytes efetivamente copiados e provar zero cópia integral; negar arquivo fora da biblioteca e reparse point; fechar Job em interrupção; não adicionar ACL ao original; comprovar ausência de fallback externo ao sandbox. Enquanto não houver adaptador validado, manter `MediaWorkerAdmission.IsMediaProcessingAvailable=false`.
