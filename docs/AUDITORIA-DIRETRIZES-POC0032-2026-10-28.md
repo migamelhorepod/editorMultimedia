@@ -2,6 +2,8 @@
 Data: 2026-10-28  
 Branch: `feature/poc003-2-revogacao-recuperacao`
 
+> **Atualização de 28/10/2026 — MIG-5:** a usuária forneceu o texto integral da habilidade pessoal `Analista sênior e desenvolvedor de software`. A auditoria cláusula por cláusula, com 52 critérios e encaminhamento de lacunas, está em [AUDITORIA-SKILL-ANALISTA-SENIOR-2026-10-28.md](AUDITORIA-SKILL-ANALISTA-SENIOR-2026-10-28.md). As referências abaixo à indisponibilidade da skill descrevem somente a situação **anterior** ao recebimento do arquivo; não constituem pendência atual.
+
 ## Escopo e limites de evidência
 
 As instruções literais da skill privada `analisar-e-desenvolver-software` **não estavam disponíveis** no catálogo de skills acessível nesta execução. Esta auditoria cobre apenas as diretrizes já estabelecidas com a usuária e verificadas no código: requisitos e protótipos revisados antes de implementar, explicações simples das decisões, versões estáveis recentes, segurança e performance acima de layout, Windows 11/HD como referência mínima, Git, BDD e automação pós-unitários. **Não equivale a certificação de aderência integral à skill** até acesso ao conteúdo instalado.
@@ -51,4 +53,4 @@ As instruções literais da skill privada `analisar-e-desenvolver-software` **n�
 
 Manter POC-003.2 e PR #8 abertas até implementar a entrada sem cópia, comprovar o protocolo com FFprobe/FFmpeg estáveis em runner Windows, testar WAV e MP4 seekable, validar o Windows 11 com HD convencional e registrar as evidências de segurança. Não desbloquear a admissão genérica de produção antes disso.
 
-**Pendência externa:** ler a skill `analisar-e-desenvolver-software` diretamente quando suas instruções estiverem expostas à conversa; refazer esta matriz contra cada cláusula literal da habilidade.
+**Pendência externa resolvida em 28/10/2026:** a habilidade foi fornecida pela usuária e auditada em `docs/AUDITORIA-SKILL-ANALISTA-SENIOR-2026-10-28.md`. Permanecem apenas as lacunas técnicas e testes listados na nova matriz.
