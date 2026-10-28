@@ -89,7 +89,7 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
 }
 
 // MIG-12 research-only path: FFprobe reads a regular file HANDLE received
-// as inherited STDIN (fd:0). No filesystem path is delivered to this worker.
+// as inherited STDIN (fd: default read descriptor 0). No filesystem path is delivered to this worker.
 // This is not an enabled production media operation.
 if (args.Length == 3 && args[0] == "--probe-fd-metadata")
 {
@@ -108,7 +108,7 @@ if (args.Length == 3 && args[0] == "--probe-fd-metadata")
     };
     foreach (string arg in new[] {
         "-v", "error", "-protocol_whitelist", "fd",
-        "-i", "fd:0", "-show_entries", "format=duration",
+        "-i", "fd:", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1" })
         command.ArgumentList.Add(arg);
     try
