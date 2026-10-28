@@ -105,12 +105,14 @@ try {
             $report.highOrCriticalVulnerabilities += $entry
         }
     }
-    $lock = Get-Content -LiteralPath (Join-Path $NodeDirectory "package-lock.json") -Raw | ConvertFrom-Json
-    foreach ($property in $lock.packages.PSObject.Properties) {
-        if ($property.Name -eq "") { continue }
+    $lock = Get-Content -LiteralPath (Join-Path $NodeDirectory "package-lock.json") -Raw | ConvertFrom-Json -AsHashtable
+    # npm lockfiles intentionally have an empty-string root package key.
+    # PowerShell's default PSCustomObject conversion rejects it.
+    foreach ($property in $lock["packages"].GetEnumerator()) {
+        if ($property.Key -eq "") { continue }
         $p = $property.Value
         $report.npmLicenses += [ordered]@{
-            name = $property.Name; version = [string]$p.version
+            name = $property.Key; version = [string]$p.version
             license = $(if ($p.license) { [string]$p.license } else { "UNKNOWN" })
             integrity = [string]$p.integrity
         }
@@ -130,6 +132,38 @@ try {
         gplBuild = ($configuration -match "(^|\s)--enable-gpl(\s|$)")
         licenseReview = "Inspect real distribution build flags and LGPL/GPL obligations before release."
     }
+    # A lightweight CycloneDX 1.5 component inventory; license declarations
+    # are evidence to review, not an automatic conclusion of legal compliance.
+    $components = @()
+    foreach ($p in $report.npmLicenses) {
+        $components += [ordered]@{
+            type = "library"; name = [string]$p.name; version = [string]$p.version
+            "bom-ref" = "npm:$($p.name)@$($p.version)"
+            licenses = @(@{ license = @{ name = [string]$p.license } })
+            properties = @(@{ name = "evidence"; value = "npm-package-lock" })
+        }
+    }
+    foreach ($p in $report.nugetPackages) {
+        $components += [ordered]@{
+            type = "library"; name = [string]$p.name; version = [string]$p.version
+            "bom-ref" = "nuget:$($p.name)@$($p.version)"
+            licenses = @(@{ license = @{ name = [string]$p.license } })
+            properties = @(@{ name = "evidence"; value = "nuget-installed-nuspec" })
+        }
+    }
+    $components += [ordered]@{
+        type = "application"; name = "ffmpeg"; version = [string]$report.ffmpeg.version
+        "bom-ref" = "ffmpeg-bundle"
+        hashes = @(@{ alg = "SHA-256"; content = [string]$report.ffmpeg.ffmpegSha256 })
+        properties = @(@{ name = "license-review"; value = "required" })
+    }
+    $bom = [ordered]@{
+        bomFormat = "CycloneDX"; specVersion = "1.5"; version = 1
+        metadata = @{ timestamp = $report.evaluatedUtc }
+        components = $components
+    }
+    $bom | ConvertTo-Json -Depth 35 |
+        Set-Content -LiteralPath (Join-Path $OutputDirectory "sbom.cdx.json") -Encoding utf8
     $unknown = @($report.npmLicenses | Where-Object { $_.license -eq "UNKNOWN" }).Count
     $report.auditSucceeded = $true
     Write-Host "NuGet/NPM advisories gathered; total findings: $($report.allVulnerabilities.Count)"
