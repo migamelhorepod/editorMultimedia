@@ -16,6 +16,30 @@ internal static class WindowsInheritedHandleFfprobe
     internal static async Task<(int ExitCode, string Output)> ReadDurationAsync(
         string ffprobe, CancellationToken cancellationToken)
     {
+        return await RunWithInheritedInputAsync(ffprobe,
+            "-v error -protocol_whitelist fd -i fd: " +
+            "-show_entries format=duration -of default=noprint_wrappers=1",
+            15000, cancellationToken);
+    }
+
+    /// <summary>
+    /// Execute real ffmpeg's decoder in AppContainer on the same single
+    /// seekable file handle. Output is discarded by the null muxer.
+    /// Experimental only; never produces user output or edits originals.
+    /// </summary>
+    internal static async Task<int> DecodeToNullAsync(
+        string ffmpeg, CancellationToken cancellationToken)
+    {
+        var result = await RunWithInheritedInputAsync(ffmpeg,
+            "-nostdin -v error -protocol_whitelist fd -i fd: -f null -",
+            30000, cancellationToken);
+        return result.ExitCode;
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunWithInheritedInputAsync(
+        string executable, string fixedArguments, uint timeoutMs,
+        CancellationToken cancellationToken)
+    {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         IntPtr input = GetStdHandle(unchecked((uint)-10));
         if (input == IntPtr.Zero || input == new IntPtr(-1))
@@ -38,22 +62,21 @@ internal static class WindowsInheritedHandleFfprobe
             hStdError = error
         };
         var commandLine = new System.Text.StringBuilder(
-            "\"" + ffprobe + "\" -v error -protocol_whitelist fd -i fd: " +
-            "-show_entries format=duration -of default=noprint_wrappers=1");
-        if (!CreateProcessW(ffprobe, commandLine, IntPtr.Zero, IntPtr.Zero,
+            "\"" + executable + "\" " + fixedArguments);
+        if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero,
                 true, 0x08000000, IntPtr.Zero, null, ref startup, out var child))
             throw new Win32Exception(Marshal.GetLastWin32Error(),
-                "Cannot start restricted seekable FFprobe child.");
+                "Cannot start restricted seekable FFmpeg codec child.");
         try
         {
             // Only the real codec is launched. It inherits the worker's
             // AppContainer security identity and the controller's Job Object.
             outputPipe.DisposeLocalCopyOfClientHandle();
-            uint wait = WaitForSingleObject(child.hProcess, 15000);
+            uint wait = WaitForSingleObject(child.hProcess, timeoutMs);
             if (wait != 0)
             {
                 TerminateProcess(child.hProcess, 1);
-                throw new TimeoutException("Restricted FFprobe failed its deadline.");
+                throw new TimeoutException("Restricted codec failed its deadline.");
             }
             if (!GetExitCodeProcess(child.hProcess, out uint code))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
