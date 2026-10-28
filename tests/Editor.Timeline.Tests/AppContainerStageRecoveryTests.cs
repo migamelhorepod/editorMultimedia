@@ -151,4 +151,48 @@ public sealed class AppContainerStageRecoveryTests
             if (Directory.Exists(folder)) Directory.Delete(folder, true);
         }
     }
+    [Fact]
+    public void GivenRealDecoderInAppContainer_WhenJobIsForceClosed_ThenBothProcessesStopAndInputIsCleaned()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string folder = Path.Combine(Path.GetTempPath(),
+            "poc0032-forced-codec-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            const int sampleCount = 24000; // 3 seconds at 8 kHz, slow-play test.
+            string wav = Path.Combine(folder, "kill.wav");
+            using (var writer = new BinaryWriter(File.Create(wav)))
+            {
+                writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+                writer.Write(36 + sampleCount);
+                writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+                writer.Write(16); writer.Write((short)1);
+                writer.Write((short)1); writer.Write(8000);
+                writer.Write(8000); writer.Write((short)1);
+                writer.Write((short)8);
+                writer.Write(Encoding.ASCII.GetBytes("data"));
+                writer.Write(sampleCount);
+                writer.BaseStream.SetLength(44L + sampleCount);
+            }
+            Guid library = Guid.NewGuid(), task = Guid.NewGuid(), resource = Guid.NewGuid();
+            var registry = new AccessGrantRegistry(library);
+            var catalog = new AuthorizedMediaCatalog(folder, registry);
+            catalog.Register(resource, wav);
+            var grant = registry.Issue(task, library, resource,
+                MediaAccessOperation.ReadChunk, TimeSpan.FromMinutes(2));
+            var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
+                task, library, resource, grant, MediaAccessOperation.ReadChunk);
+            Assert.Equal(0, WindowsAppContainerLauncher.RunAuthorizedInterruptedDecodeProbe(
+                Worker(), catalog, request));
+            Assert.True(File.Exists(wav));
+            Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
+            registry.RevokeTask(task);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WindowsAppContainerLauncher.RunAuthorizedInterruptedDecodeProbe(
+                    Worker(), catalog, request));
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
 }
