@@ -62,10 +62,13 @@ internal sealed class WindowsScopedCodecInput : IDisposable
             using (var input = new FileStream(source, FileMode.Open, FileAccess.Read,
                 FileShare.Read, 1024 * 1024, FileOptions.SequentialScan))
             using (var output = new FileStream(stage, FileMode.CreateNew, FileAccess.Write,
-                FileShare.None, 1024 * 1024, FileOptions.WriteThrough))
+                FileShare.None, 1024 * 1024, FileOptions.None))
             {
+                // Staging data is expendable and guarded by a durable lease.
+                // Avoid write-through on conventional HDDs; incomplete copies
+                // after an OS crash are discarded before any future task.
                 input.CopyTo(output, 1024 * 1024);
-                output.Flush(flushToDisk: true);
+                output.Flush();
             }
 
             if (new FileInfo(stage).Length != length)
