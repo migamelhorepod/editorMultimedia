@@ -268,7 +268,7 @@ public static class WindowsAppContainerLauncher
         string source = catalog.Resolve(request);
         using var input = new FileStream(source, FileMode.Open, FileAccess.Read,
             FileShare.Read, 4096, FileOptions.RandomAccess);
-        if (input.Length is <= 0 or > (10L * 1024 * 1024 * 1024))
+        if (input.Length <= 0 || input.Length > 10L * 1024 * 1024 * 1024)
             throw new IOException("Invalid authorized media input length.");
         if (!string.Equals(catalog.Resolve(request), source, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Media grant changed before probe.");
