@@ -62,7 +62,7 @@ public sealed class AppContainerStageRecoveryTests
                 Assert.Equal(initialHash, Convert.ToHexString(SHA256.HashData(input)));
             Assert.Empty(Directory.GetFiles(folder, ".editorworker-*", SearchOption.TopDirectoryOnly));
         }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        finally { WindowsMediaFixtureCleanup.Remove(folder); }
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class AppContainerStageRecoveryTests
             Assert.Equal("preserve original", File.ReadAllText(untrustedInput));
             Assert.True(File.Exists(untrustedLease));
         }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        finally { WindowsMediaFixtureCleanup.Remove(root); }
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class AppContainerStageRecoveryTests
         finally
         {
             if (!owner.HasExited) owner.Kill(entireProcessTree: true);
-            if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            WindowsMediaFixtureCleanup.Remove(folder);
         }
     }
     [Fact]
@@ -209,7 +209,7 @@ public sealed class AppContainerStageRecoveryTests
                 WindowsAppContainerLauncher.RunAuthorizedInterruptedDecodeProbe(
                     Worker(), catalog, request));
         }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        finally { WindowsMediaFixtureCleanup.Remove(folder); }
     }
 
 }
