@@ -9,7 +9,7 @@ public sealed class AuthorizedMediaCatalog
 {
     private readonly AccessGrantRegistry grants;
     private readonly string root;
-    private readonly Dictionary<Guid, string> paths = new();
+    private readonly Dictionary<Guid, (string Path, WindowsFileIdentity? Identity)> paths = new();
     private readonly object gate = new();
 
     public AuthorizedMediaCatalog(string libraryRoot, AccessGrantRegistry grants)
@@ -28,7 +28,12 @@ public sealed class AuthorizedMediaCatalog
     {
         if (resourceId == Guid.Empty) throw new ArgumentException("Missing resource ID.");
         string path = ValidateFile(physicalFile);
-        lock (gate) paths.Add(resourceId, path);
+        // The original file must be bound to a physical identity, not only
+        // its name. This prevents replacing an authorized file with a
+        // different one at the same path after media registration.
+        WindowsFileIdentity? identity = OperatingSystem.IsWindows()
+            ? WindowsFileIdentity.FromPath(path) : null;
+        lock (gate) paths.Add(resourceId, (path, identity));
     }
 
     public void Unregister(Guid resourceId)
@@ -42,13 +47,42 @@ public sealed class AuthorizedMediaCatalog
         if (request.Operation is not (MediaAccessOperation.InspectMetadata or MediaAccessOperation.ReadChunk) ||
             grants.Authorize(request) != AccessDecision.Allowed)
             throw new UnauthorizedAccessException("Task, library, resource or operation is not authorized.");
-        string file;
+        (string Path, WindowsFileIdentity? Identity) binding;
         lock (gate)
         {
-            if (!paths.TryGetValue(request.ResourceId, out file!))
+            if (!paths.TryGetValue(request.ResourceId, out binding))
                 throw new UnauthorizedAccessException("Resource is not registered in the active library.");
         }
-        return ValidateFile(file); // Reject file swaps and reparse points at access time.
+        string file = ValidateFile(binding.Path);
+        if (binding.Identity is { } expected &&
+            WindowsFileIdentity.FromPath(file) != expected)
+            throw new UnauthorizedAccessException(
+                "Authorized media was replaced after registration.");
+        return file; // Reject path, reparse and physical file replacement.
+    }
+
+    /// <summary>
+    /// Compare the exact read-only HANDLE opened for the sandbox against
+    /// the file registered by the controller. Prevents time-of-check to
+    /// time-of-use swaps even after Resolve() validated the path.
+    /// </summary>
+    internal void ValidateOpenedHandle(WorkerRequest request,
+        Microsoft.Win32.SafeHandles.SafeFileHandle opened)
+    {
+        if (request.Operation is not (MediaAccessOperation.InspectMetadata or
+            MediaAccessOperation.ReadChunk) ||
+            grants.Authorize(request) != AccessDecision.Allowed)
+            throw new UnauthorizedAccessException("Media task grant revoked.");
+        (string Path, WindowsFileIdentity? Identity) binding;
+        lock (gate)
+        {
+            if (!paths.TryGetValue(request.ResourceId, out binding))
+                throw new UnauthorizedAccessException("Media is not registered.");
+        }
+        if (binding.Identity is not { } expected ||
+            WindowsFileIdentity.FromHandle(opened) != expected)
+            throw new UnauthorizedAccessException(
+                "Opened input HANDLE does not match registered media identity.");
     }
 
     private string ValidateFile(string file)
