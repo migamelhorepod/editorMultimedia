@@ -206,6 +206,48 @@ internal static class Program
             (int total, int failures) = ReadTrx(Path.Combine(evidence, "physical.trx"));
             report["observedTrxCases"] = total;
             report["observedTrxFailures"] = failures;
+            // The earlier runner only executed xUnit fixtures under D: and
+            // generated this 64 MiB WAV without ever inspecting/decoding it.
+            // Exercise this EXACT physical file using the production-facing
+            // AppContainer service, then verify its hash and staging state.
+            bool xunitPassed = exit == 0 && total >= 8 && failures == 0;
+            report["xunitTestsPassed"] = xunitPassed;
+            bool directFixturePassed = false;
+            if (xunitPassed)
+            {
+                var isolated = new IsolatedMediaProcessingService(
+                    caseFolder, Guid.NewGuid(),
+                    Path.Combine(testWorker, "Editor.Security.Worker.exe"));
+                try
+                {
+                    var probeTimer = Stopwatch.StartNew();
+                    long durationTicks = isolated.InspectDurationTicks(fixture);
+                    probeTimer.Stop();
+                    report["fixtureMetadataDurationTicks"] = durationTicks;
+                    report["fixtureMetadataElapsedSeconds"] =
+                        Math.Round(probeTimer.Elapsed.TotalSeconds, 3);
+                    var decodeTimer = Stopwatch.StartNew();
+                    isolated.DecodeToNull(fixture);
+                    decodeTimer.Stop();
+                    report["fixtureDecodeElapsedSeconds"] =
+                        Math.Round(decodeTimer.Elapsed.TotalSeconds, 3);
+                    // A 8 kHz, 8-bit mono WAV has one sample per byte.
+                    long expected = checked(mediaMiB * MiB * TimeSpan.TicksPerSecond / 8000);
+                    long tolerance = TimeSpan.FromMilliseconds(250).Ticks;
+                    directFixturePassed = durationTicks > 0 &&
+                        Math.Abs(durationTicks - expected) <= tolerance;
+                    report["fixtureDirectAppContainerPassed"] = directFixturePassed;
+                }
+                finally
+                {
+                    isolated.RevokeAll();
+                }
+            }
+            else
+            {
+                report["fixtureDirectAppContainerPassed"] = false;
+                report["fixtureDirectAppContainerSkipped"] = "xUnit tests failed";
+            }
             bool hashOk = string.Equals(beforeHash, Sha256(fixture),
                 StringComparison.OrdinalIgnoreCase);
             report["fixtureSha256After"] = Sha256(fixture);
@@ -213,7 +255,7 @@ internal static class Program
             int staged = Directory.EnumerateFiles(caseFolder, ".editorworker-*",
                 SearchOption.AllDirectories).Count();
             report["stagingFilesRemaining"] = staged;
-            passed = exit == 0 && total >= 8 && failures == 0 && hashOk && staged == 0;
+            passed = xunitPassed && directFixturePassed && hashOk && staged == 0;
             report["testsPassed"] = passed;
             Console.WriteLine(passed
                 ? "TESTES SINTETICOS NO D: APROVADOS. POC-003.2 AINDA NAO HOMOLOGADA."
