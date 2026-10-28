@@ -85,6 +85,14 @@ public sealed class AppContainerStageRecoveryTests
             File.WriteAllText(staleInput, "crash copy");
             File.WriteAllText(staleLease, LeaseProof(staleId));
             File.WriteAllText(liveInput, "live worker");
+            // A user-created GUID-looking file without our persisted lease
+            // proof must never be treated as an application-owned temporary.
+            Guid untrustedId = Guid.NewGuid();
+            string untrustedStem = ".editorworker-" + untrustedId.ToString("N");
+            string untrustedInput = Path.Combine(nested, untrustedStem + ".input.wav");
+            string untrustedLease = Path.Combine(nested, untrustedStem + ".lease");
+            File.WriteAllText(untrustedInput, "preserve original");
+            File.WriteAllText(untrustedLease, "not an application lease");
             string unrelated = Path.Combine(nested, "do-not-delete.wav");
             File.WriteAllText(unrelated, "user media");
             File.WriteAllText(liveLease, LeaseProof(liveId));
@@ -98,12 +106,16 @@ public sealed class AppContainerStageRecoveryTests
                 Assert.True(File.Exists(liveLease));
                 Assert.Equal(0, service.RecoverAbandonedInputs());
                 Assert.Equal("user media", File.ReadAllText(unrelated));
+                Assert.True(File.Exists(untrustedInput));
+                Assert.True(File.Exists(untrustedLease));
             }
             var another = new IsolatedMediaProcessingService(root, Guid.NewGuid(), Worker());
             Assert.Equal(0, another.RecoverAbandonedInputs()); // Constructor already reclaimed.
             Assert.False(File.Exists(liveInput));
             Assert.False(File.Exists(liveLease));
             Assert.True(File.Exists(unrelated));
+            Assert.Equal("preserve original", File.ReadAllText(untrustedInput));
+            Assert.True(File.Exists(untrustedLease));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
