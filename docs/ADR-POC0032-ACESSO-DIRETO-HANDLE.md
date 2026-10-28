@@ -1,35 +1,31 @@
-# ADR — acesso direto e seguro a mídias pelo AppContainer
+# ADR — entrada seekable sem cópia integral no AppContainer
 
-Status: implementado na branch de POC, sujeito à homologação da execução real no Windows 11.
+**Status: investigação concluída; implementação NÃO homologada e NÃO ativada.**
+Branch de trabalho: `feature/poc003-2-revogacao-recuperacao`.
 
-## Decisão de arquitetura
+## Objetivo aprovado
 
-O processo principal (controlador) é o único responsável por resolver caminhos e abrir mídias autorizadas no disco D:. Para **InspectMetadata** e **ReadChunk**, ele abre o arquivo com `CreateFileW` em modo de leitura, rejeita o arquivo como ponto de redirecionamento e valida o recurso, a tarefa e a biblioteca. Usa `DuplicateHandle` para preparar apenas o identificador permitido, que é herdado pelo worker AppContainer através de `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` na criação suspensa do processo.
+O processamento de mídias de até 10 GB deve acontecer dentro de um worker AppContainer, sem precisar duplicar integralmente cada mídia no HD convencional. A solução deve permitir acesso aleatório (seek) necessário para contêineres como MP4, mantendo a segurança e o desempenho como prioridades.
 
-O processo é anexado a um Job Object com limites antes de ser retomado. O worker verifica seu token AppContainer e o identificador herdado. O FFprobe ou FFmpeg recebe esse identificador como entrada via protocolo `handle:`, que admite busca aleatória no arquivo. O caminho físico e a ACL original não são repassados ao worker, e **não existe fallback fora do AppContainer**. O Job Object e o fechamento dos identificadores revogam o acesso efetivo ao encerrar a tarefa.
+## Descobertas verificadas
 
-## Motivação
+- A compilação **FFmpeg/FFprobe 9.0.2-essentials_build-www.gyan.dev** obtida via Chocolatey na execução GitHub Actions #645 **não contém o protocolo `handle:`**. O script de empacotamento corretamente rejeitou a ausência.
+- A versão 9.0.2 contém a documentação do protocolo **`fd:`**, com acesso seekable se o descritor corresponder a um arquivo regular, mas é necessário validar a herança/mapeamento de stdin no Windows. Não é correto assumir que o identificador nativo Win32 seja um descritor CRT `fd`.
+- O controlador atual possui validação por biblioteca, recurso, tarefa e operação, token AppContainer, Job Object e IPC autenticada. O processamento vigente usa cópias temporárias identificadas e recuperáveis. A execução #629 aprovou 305 testes .NET e 27 testes Playwright antes da investigação do zero-copy.
+- Foi tentada uma mudança baseada em identificadores Win32 herdáveis; **não foi homologada**. Uma alteração necessária na passagem da entrada ao codec foi bloqueada pela ferramenta de edição. Os arquivos de execução foram restaurados ao último estado comprovadamente funcional, sem fallback fora do AppContainer.
 
-A cópia temporária prévia de cada mídia obrigava a reservar até 10 GB adicionais, duplicava leitura/gravação no HD convencional e atrasava o início de todas as operações. O novo mecanismo mantém o arquivo no lugar e fornece acesso de leitura limitado por identificador de kernel, sem cópia integral e com busca aleatória.
+## Decisão arquitetural proposta
 
-## Regras inegociáveis
+1. Definir uma abstração de autorização de entrada de mídia isolada, independente da UI e da biblioteca.
+2. Preferir entrega de um HANDLE de leitura **específico por arquivo**, sem transmitir o caminho original ao worker e sem alterar ACLs da mídia.
+3. Converter o HANDLE para entrada seekable real suportada pela versão estável do decodificador; validar com testes do processo no runner Windows antes de ativar.
+4. Garantir que fechamento do Job e revogação de tarefa parem o uso de identificadores já concedidos.
+5. Rejeitar simbolic links/reparse points, mudanças de identidade de arquivo e entrada não autorizada, sem conceder acesso ao diretório nem permitir fallback irrestrito.
 
-- Somente arquivo da biblioteca ativa e operação autorizada; nenhum diretório herdado.
-- Identificador herdado com acesso de **leitura**, nunca escrita; abrir sem seguir o link do próprio arquivo.
-- Sem permissões amplas para AppContainer e sem alterar ACLs da mídia original.
-- Não usar `pipe:0` como substituto do acesso aleatório para formatos como MP4.
-- Somente FFmpeg/FFprobe 9.x estáveis com suporte ao protocolo Windows `handle:`; empacotamento deve falhar se ausente.
-- Janela de execução protegida por token, PID, Job Object, tempo limitado e validações de autorização. Decodificação e extração de metadados somente no worker.
-- Manter a recuperação dos antigos estágios `.editorworker-*.lease` para instalações já utilizadas; o fluxo novo não os cria.
+## Bloqueadores para implementação completa
 
-## Provas necessárias
+- Escolher e validar um adaptador de entrada seekable para **FFmpeg 9.x estável** (protocolo `fd:` em descritor CRT válido ou build estável com protocolo Windows HANDLE nativo).
+- Provar em CI: WAV e MP4 com `moov` no final, zero cópias, nenhum ACL novo no original, Job kill, sem processos órfãos, sem rede e revogação imediata.
+- Testes físicos com mídias de vários GB no Windows 11 e HD convencional D: antes da homologação de 10 GB.
 
-1. WAV e MP4 sintéticos com metadados reais e decodificação dentro do AppContainer, **sem** conceder ACL de mídia original à identidade do AppContainer.
-2. Comprovar ausência de `.editorworker-*` novo no fluxo direto; hash do arquivo original preservado.
-3. Testar encerramento forçado e bloqueio de rede; comprovar ausência de processos órfãos e revogação pelo fechamento do Job.
-4. Medir memória e disco com vídeos grandes no Windows 11 + HD convencional. O limite de arquivo de 10 GB permanece como requisito e não foi validado apenas com mídias pequenas.
-5. Não desbloquear a admissão genérica de produção antes dos testes de segurança e integração com o editor WPF.
-
-## Escopo da POC
-
-A migração para acesso por HANDLE reduz a futura necessidade de refazer o pipeline de leitura e é a base arquitetural definitiva proposta. Isso **não** equivale à homologação completa de 10 GB, exportação, thumbnails ou integração produtiva geral.
+**Regra:** não declarar POC-003.2 concluída, não ativar processamento genérico e não permitir fallback fora do AppContainer até existir execução validada.
