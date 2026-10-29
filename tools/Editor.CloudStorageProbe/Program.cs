@@ -84,9 +84,7 @@ internal static class Program
         string prefix = "editor-cloud-poc/" + Guid.NewGuid().ToString("N") + "/";
         string smallKey = prefix + "small-test.bin";
         string largeKey = prefix + "multipart-test.bin";
-        bool smallWritten = false;
         bool multipartCreated = false;
-        bool largeWritten = false;
         string? uploadId = null;
         try
         {
@@ -110,7 +108,6 @@ internal static class Program
                     InputStream = input, ContentType = "application/octet-stream"
                 });
             }
-            smallWritten = true;
             result.SmallPutMs = watch.ElapsedMilliseconds;
 
             watch.Restart();
@@ -162,7 +159,6 @@ internal static class Program
                     UploadId = uploadId,
                     PartETags = parts
                 });
-            largeWritten = true;
             multipartCreated = false;
             result.MultipartMs = watch.ElapsedMilliseconds;
 
@@ -227,12 +223,13 @@ internal static class Program
                     {
                         BucketName = cfg.Bucket, Key = largeKey, UploadId = uploadId
                     });
-                if (smallWritten)
-                    await client.DeleteObjectAsync(
-                        new DeleteObjectRequest { BucketName = cfg.Bucket, Key = smallKey });
-                if (largeWritten)
-                    await client.DeleteObjectAsync(
-                        new DeleteObjectRequest { BucketName = cfg.Bucket, Key = largeKey });
+                // Delete both unique synthetic keys even if an earlier PUT
+                // timed out after being committed remotely. S3 deletion of a
+                // non-existent object is idempotent and never targets user media.
+                await client.DeleteObjectAsync(
+                    new DeleteObjectRequest { BucketName = cfg.Bucket, Key = smallKey });
+                await client.DeleteObjectAsync(
+                    new DeleteObjectRequest { BucketName = cfg.Bucket, Key = largeKey });
                 result.CleanupSucceeded = true;
             }
             catch (Exception cleanupError)
