@@ -1,0 +1,84 @@
+name: POC de armazenamento — Oracle OCI x Cloudflare R2
+
+on:
+  push:
+    paths:
+      - 'tools/Editor.CloudStorageProbe/**'
+      - 'tests/Editor.CloudStorage.Tests/**'
+      - 'tests/testar-nuvem.cmd'
+      - '.github/workflows/cloud-storage-poc.yml'
+  pull_request:
+    paths:
+      - 'tools/Editor.CloudStorageProbe/**'
+      - 'tests/Editor.CloudStorage.Tests/**'
+      - 'tests/testar-nuvem.cmd'
+      - '.github/workflows/cloud-storage-poc.yml'
+  workflow_dispatch:
+    inputs:
+      live_cloud_compare:
+        description: 'Executar teste real com buckets de prova e segredos configurados? (pode gerar cobranca)'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    name: Oracle/R2 — contrato local e falhas (sem credenciais)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Preparar .NET 10 LTS
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Executar testes no CMD
+        shell: cmd
+        run: tests\testar-nuvem.cmd
+      - name: Publicar resultados xUnit
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cloud-poc-offline-trx
+          path: TestResults/cloud-poc/
+          retention-days: 14
+          if-no-files-found: warn
+
+  live-comparison:
+    name: OCI e R2 — comparacao real opt-in (sem midias pessoais)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_cloud_compare == true }}
+    needs: contract-tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      OCI_NAMESPACE: ${{ vars.OCI_NAMESPACE }}
+      OCI_REGION: ${{ vars.OCI_REGION }}
+      OCI_BUCKET: ${{ vars.OCI_BUCKET }}
+      OCI_ACCESS_KEY_ID: ${{ secrets.OCI_ACCESS_KEY_ID }}
+      OCI_SECRET_ACCESS_KEY: ${{ secrets.OCI_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Preparar .NET 10 LTS
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Comparar buckets com dados sinteticos e exclusao restrita
+        shell: cmd
+        run: dotnet run --project tools\Editor.CloudStorageProbe\Editor.CloudStorageProbe.csproj --configuration Release -- --live
+      - name: Publicar resultados sem segredos
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cloud-poc-live-comparison
+          path: TestResults/cloud-poc/live-comparison.json
+          retention-days: 14
+          if-no-files-found: warn
