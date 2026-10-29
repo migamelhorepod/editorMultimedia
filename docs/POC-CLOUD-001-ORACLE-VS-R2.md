@@ -71,6 +71,8 @@ Criar buckets **exclusivos para a POC**, privados e sem dados pessoais, com pol�
 
 **Observação técnica:** R2 usa a região `auto` na API S3 e o código da POC contempla buckets da jurisdição padrão. Se escolher bucket com jurisdição EU/US/FedRAMP, o endpoint é diferente e esta versão do teste deve ser revista antes de usá-lo. O multipart de prova agora utiliza **13 MiB (12+1 MiB)**: tamanho inicial conservador para interoperar com os dois fornecedores. A comparação não valida recuperação de upload interrompido de 10 GiB nem faz benchmark estatisticamente confiável.
 
+**Atenção ao disparo manual:** verificado que `.github/workflows/cloud-storage-poc.yml` existe nesta branch de desenvolvimento, mas **ainda não existe na `main`**. Pela regra do GitHub, o botão `Run workflow` do evento `workflow_dispatch` só aparece quando o arquivo também está na branch padrão. **Não integrar a PR #8 para contornar isso.** Antes do teste real, publicar/revisar somente o workflow isolado na `main` ou estabelecer um disparador seguro equivalente, preservando a POC-003.2 bloqueada. Referência: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch
+
 No GitHub: **Actions → POC de armazenamento — Oracle OCI x Cloudflare R2 → Run workflow → marcar live_cloud_compare → Run workflow**. Isso só será realizado após autorizar explicitamente o acesso e os possíveis custos nas contas.
 
 O resultado é `TestResults/cloud-poc/live-comparison.json`, com tempos, faixas lidas, integridade e limpeza, **sem as chaves de API**. Faltas de segredos geram falha explícita e não são contabilizadas como aprovação.
