@@ -142,7 +142,7 @@ internal static class Program
             })
             {
                 using var piece = new MemoryStream(large, offset, count,
-                    publiclyVisible: false);
+                    writable: false, publiclyVisible: false);
                 var response = await client.UploadPartAsync(new UploadPartRequest
                 {
                     BucketName = cfg.Bucket,
