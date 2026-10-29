@@ -51,7 +51,7 @@ internal static class Program
         {
             if (Environment.OSVersion.Version.Build < 22000)
                 throw new PlatformNotSupportedException("Windows 11 e exigido.");
-            using var disk = new DriveInfo(@"D:\");
+            var disk = new DriveInfo(@"D:\");
             if (!disk.IsReady || disk.DriveType != DriveType.Fixed)
                 throw new IOException("Unidade local D: nao disponivel.");
             // Importing the source into a different active test library may
