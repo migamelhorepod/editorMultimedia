@@ -52,6 +52,10 @@ jobs:
     name: OCI e R2 — comparacao real opt-in (sem midias pessoais)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_cloud_compare == true }}
     needs: contract-tests
+    # Environment-scoped credentials are intentionally unavailable to normal
+    # push/PR jobs. Configure a protected "cloud-poc" environment in GitHub
+    # Settings; require reviewers/branch restrictions when available.
+    environment: cloud-poc
     runs-on: windows-latest
     timeout-minutes: 15
     env:
