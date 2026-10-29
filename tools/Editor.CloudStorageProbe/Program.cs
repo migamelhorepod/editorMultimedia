@@ -33,7 +33,7 @@ internal static class Program
         var report = new CloudComparisonReport
         {
             EvaluatedUtc = DateTimeOffset.UtcNow,
-            Scenario = "64KiB PUT/full GET; 6MiB multipart; 3x bounded ranged GET",
+            Scenario = "64KiB PUT/full GET; 13MiB multipart (12+1); 3x bounded ranged GET",
             RealProvidersTested = false,
             ProductionApproved = false,
             PersonalMediaAccessed = false
@@ -48,7 +48,7 @@ internal static class Program
             report.RealProvidersTested = true;
 
             byte[] small = new byte[64 * 1024];
-            byte[] large = new byte[6 * MiB];
+            byte[] large = new byte[13 * MiB];
             RandomNumberGenerator.Fill(small);
             RandomNumberGenerator.Fill(large);
             // Same test data for both providers; never use user media.
@@ -134,8 +134,8 @@ internal static class Program
             var parts = new List<PartETag>();
             foreach (var (number, offset, count) in new[]
             {
-                (1, 0, 5 * MiB),
-                (2, 5 * MiB, 1 * MiB)
+                (1, 0, 12 * MiB),
+                (2, 12 * MiB, 1 * MiB)
             })
             {
                 using var piece = new MemoryStream(large, offset, count,
@@ -170,10 +170,10 @@ internal static class Program
             if (metadata.ContentLength != large.LongLength)
                 throw new InvalidDataException("Multipart object size mismatch.");
             result.MultipartBytes = large.Length;
-            // Tests a boundary crossing a 5MiB part, a middle slice and tail.
+            // Tests a boundary crossing a 12MiB part, a middle slice and tail.
             foreach (var (offset, length) in new (long, int)[]
             {
-                (0, 4096), (5L * MiB - 2048, 4096), (large.LongLength - 4096, 4096)
+                (0, 4096), (12L * MiB - 2048, 4096), (large.LongLength - 4096, 4096)
             })
             {
                 var range = CloudRangeRules.CheckedRange(offset, length, large.Length);
