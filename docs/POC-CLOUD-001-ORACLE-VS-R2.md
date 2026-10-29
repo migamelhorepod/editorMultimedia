@@ -77,3 +77,11 @@ O resultado é `TestResults/cloud-poc/live-comparison.json`, com tempos, faixas 
 ## Critérios de decisão
 
 Somente considerar provedor após `CLD-01..08` aprovados no CI, seguida de `CLD-09..11` em **ambos** os buckets autorizados, com relatório não ambíguo. Comparar latência medida em repetidas execuções, classes e custos por GB/operação/transferência, disponibilidade na região desejada e segurança. Sem credenciais reais, o veredito técnico é **contratos testados; fornecedores remotos não verificados**.
+
+## Resultado efetivamente executado (29/10/2026 UTC)
+
+- GitHub Actions [cloud POC #7](https://github.com/migamelhorepod/editorMultimedia/actions/runs/40800263637): **SUCCESS**, xUnit Windows com **22 testes Passed, 0 Failed e 0 Skipped** para endpoints, ranges, verificação de integridade, erros HTTP, retries e cancelamento.
+- Job de comparação real Oracle/R2 do mesmo pipeline: **SKIPPED deliberadamente** — não há segredos/buckets autorizados, logo **não existe evidência de upload/download nem latência/custo reais nos fornecedores**.
+- Pipeline principal [#819](https://github.com/migamelhorepod/editorMultimedia/actions/runs/40800263655): **SUCCESS** para build/test, gate POC-003.1 e gate experimental POC-003.2. Mudanças isoladas não alteraram admissão produtiva do AppContainer.
+- A verificação de limpeza do teste live apaga somente as duas chaves sintéticas geradas em prefixo aleatório mesmo se houver resposta ambígua de PUT (commit `fb1ac34`); nunca apaga objetos pré-existentes.
+- **Próximo gate:** obter dois buckets privados exclusivos e credenciais temporárias de mínimo privilégio por meio de Secrets do GitHub, configurar variáveis não secretas, aprovar eventual custo e disparar manualmente o job live. Não marcar fornecedor como aprovado com base apenas nos testes offline.
