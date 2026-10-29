@@ -36,3 +36,46 @@ Usuária executou `tests\homologar-d.cmd` em Windows local, D: fixo, com WAV sin
 - Vulnerabilidades nativas FFmpeg 9.0.2 e obrigações GPL/redistribuição continuam abertas. `MediaWorkerAdmission.IsMediaProcessingAvailable` deve permanecer `false` e nenhuma PR deve ser integrada para produção com gate aberto.
 
 **Estado:** bateria local xUnit **PASSOU 10/10**; geração de evidência final **FALHOU** por bug do coletor, já corrigido em código e aguardando reexecução física. Não homologado.
+---
+
+## Segunda execução física no D: — 28/10/2026 às 21h10 (Brasília)
+
+**Fonte recebida:** novo arquivo `physical-hdd-evidence(1).json`, gerado pelo runner local corrigido. O arquivo contém informações locais particulares (caminhos de perfil, SID e hashes dos codecs), não reproduzidas aqui. A evidência privada original deve ser preservada fora do repositório público.
+
+### Resultados observados no JSON
+
+| Indicador | Resultado |
+|---|---|
+| Execução física local | `executedLocally=true` |
+| Windows | build NT `10.0.26300` (Windows 11 pelo build, embora a string mencione Windows 10) |
+| Volume | `D:\`, tipo `Fixed`; **não confirma HDD mecânico** |
+| Arquivo gerado no D: | WAV PCM de 64 MiB, 67.108.908 bytes com cabeçalho |
+| Resultado final | `testExitCode=0`, `testsPassed=true` |
+| xUnit TRX analisado pelo coletor | `observedTrxCases=10`, `observedTrxFailures=0`, `xunitTestsPassed=true` |
+| Inspeção e decodificação da fixture física de 64 MiB | `fixtureDirectAppContainerPassed=true` |
+| Tempo para consulta de duração da fixture | 0,534 s |
+| Tempo para decodificar a fixture | 2,559 s |
+| Tempo total da suíte de testes xUnit | 10,84 s |
+| Pico observado de memória | 94.457.856 bytes (~90,08 MiB) **somente do processo `dotnet test`**, não inclui memória de worker/FFmpeg |
+| Integridade da fixture | `fixtureSha256Unchanged=true`, hash antes/depois idêntico |
+| Arquivos staging restantes | `stagingFilesRemaining=0` |
+| FFmpeg/FFprobe | versão 9.0.2 `full_build` encontrada no Windows local; sem nova prova de correção de CVEs |
+| Autorização para produção e distribuição | **Ambas false** |
+
+**Interpretação:** a regressão do coletor de memória e o defeito da primeira medição física foram corrigidos; a segunda execução comprova 10/10 testes concluídos, análise e decodificação do **próprio arquivo WAV físico de 64 MiB**, hash intacto e nenhuma cópia de staging remanescente no diretório de teste. O JSON é evidência da execução; não foram reenviados TRX e log da segunda execução nesta mensagem.
+
+### Critérios BDD
+
+- **Dado** um WAV de 64 MiB criado no volume D: e autorizado ao AppContainer, **quando** FFprobe consulta metadados e FFmpeg o decodifica em saída nula, **então** a execução retorna sucesso, preserva o hash original e não deixa staging residual no diretório de teste. **Aprovado na segunda execução.**
+- **Dado** dez casos xUnit automatizados selecionados, **quando** a suíte termina, **então** o coletor registra exit code 0, 10 casos, 0 falhas e preserva o relatório mesmo após o processo encerrar. **Aprovado.**
+- **Dado** o ambiente local com uma unidade D: reportada como `Fixed`, **quando** a ferramenta registra características do disco, **então** não presume que é HDD mecânico apenas pela flag. **A confirmação física ainda está pendente.**
+- **Dado** os gates de FFmpeg nativo, distribuição e 10 GiB ainda não atendidos, **quando** os testes de 64 MiB passam, **então** `readyForProduction=false` e `readyForDistribution=false` permanecem. **Aprovado o bloqueio.**
+
+### Próximas validações necessárias
+
+1. Confirmar se o D: é **HDD** usando `Otimizar Unidades` ou informação equivalente do Windows; a execução verificou somente unidade local fixa.
+2. Medir mídia de vários GiB até 10 GiB em formato capaz de representar esse tamanho; WAV RIFF 32-bit clássico não é suficiente. Medir I/O físico, CPU, RAM dos **processos worker/FFmpeg**, e consumo de disco ao longo da operação.
+3. Comprovar recuperação de processamento real após queda de processo/fechamento/reinicialização, inclusive integridade do projeto e revogação dos handles; o teste de encerramento forçado é uma prova parcial, não a homologação completa do fluxo transacional.
+4. Resolver ou mitigar com evidência verificável as CVEs nativas do FFmpeg, licença/redistribuição e proveniência do binário. Não remover `MediaWorkerAdmission=false`, nem liberar a PR #8 para produção ainda.
+
+**Estado atualizado:** **ETAPA FÍSICA SINTÉTICA 64 MiB APROVADA**; **HOMOLOGAÇÃO COMPLETA POC-003.2 PENDENTE**.
