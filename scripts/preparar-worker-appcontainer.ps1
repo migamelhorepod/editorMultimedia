@@ -49,9 +49,16 @@ if ($pair) {
 
 foreach ($name in @("ffmpeg", "ffprobe")) {
     $tool = Join-Path $codecDir ($name + ".exe")
-    $banner = & $tool -version | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or $banner -notmatch 'version\s+9\.[0-9]+') {
-        throw "$name deve ser versão estável 9.x: $banner"
+    # Do not pipe a native executable to Select-Object -First 1.
+    # Windows PowerShell 5.1 may close stdout early, resulting in a broken
+    # pipe and a nonzero native exit code despite a valid FFprobe 9.x banner.
+    # Read the full output and capture the native exit code immediately.
+    $versionLines = @(& $tool -version)
+    $versionExitCode = $LASTEXITCODE
+    $banner = if ($versionLines.Count -gt 0) { [string]$versionLines[0] } else { "" }
+    $expectedBanner = '^' + [regex]::Escape($name) + ' version 9\.[0-9]+(?:\.|-|\s|$)'
+    if ($versionExitCode -ne 0 -or $banner -notmatch $expectedBanner) {
+        throw "$name deve ser versão estável 9.x e terminar sem erro (exit $versionExitCode): $banner"
     }
     $target = Join-Path $bundle ($name + ".exe")
     Copy-Item $tool $target -Force
