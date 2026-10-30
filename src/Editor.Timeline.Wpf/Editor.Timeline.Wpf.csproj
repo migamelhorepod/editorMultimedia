@@ -7,5 +7,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="..\Editor.Timeline\Editor.Timeline.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\Editor.Timeline\Editor.Timeline.csproj" /><ProjectReference Include="..\Editor.Security\Editor.Security.csproj" /><ProjectReference Include="..\Editor.Security.Worker\Editor.Security.Worker.csproj" ReferenceOutputAssembly="false" /></ItemGroup>
+
 </Project>

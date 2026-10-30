@@ -1,3 +1,4 @@
+using Editor.Security.Worker;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Diagnostics;
@@ -88,14 +89,87 @@ if (args.Length == 2 && args[0] == "--restricted-pipe")
     }
 }
 
+// MIG-12 research-only path: FFprobe reads a regular file HANDLE received
+// as inherited STDIN (fd: default read descriptor 0). No filesystem path is delivered to this worker.
+// This is not an enabled production media operation.
+if (args.Length == 3 && args[0] == "--probe-fd-metadata")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    if (!Guid.TryParseExact(args[2], "N", out var requestId) ||
+        requestId == Guid.Empty) return 71;
+    string ffprobe = Path.Combine(AppContext.BaseDirectory, "ffprobe.exe");
+    if (!File.Exists(ffprobe)) return 75;
+    try
+    {
+        using var probeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
+        var (exitCode, output) =
+            await WindowsInheritedHandleFfprobe.ReadDurationAsync(
+                ffprobe, probeDeadline.Token);
+        if (exitCode != 0) return 77;
+        string? durationLine = output.Split('\n').FirstOrDefault(
+            s => s.Trim().StartsWith("duration=", StringComparison.Ordinal));
+        if (durationLine is null ||
+            !double.TryParse(durationLine.Trim()["duration=".Length..],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var duration) ||
+            !double.IsFinite(duration) || duration is <= 0 or > 604800)
+            return 79;
+        long ticks = checked((long)Math.Round(duration * TimeSpan.TicksPerSecond));
+        using var pipeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[1],
+            new WindowsWorkerMetadataPipe.MetadataReport(
+                WorkerRequest.CurrentVersion, requestId, ticks), pipeTimeout.Token);
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+        System.ComponentModel.Win32Exception or OperationCanceledException or
+        InvalidDataException or OverflowException or TimeoutException)
+    {
+        return 78;
+    }
+}
+
+// POC-003.2 proof: decode one authorized inherited seekable file handle
+// using real FFmpeg without a staged copy, within the AppContainer Job.
+if (args.Length == 3 && args[0] == "--probe-fd-decode")
+{
+    if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
+    if (!Guid.TryParseExact(args[2], "N", out Guid requestId) ||
+        requestId == Guid.Empty) return 71;
+    string codec = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
+    if (!File.Exists(codec)) return 75;
+    try
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(250));
+        if (await WindowsInheritedHandleFfprobe.DecodeToNullAsync(codec, deadline.Token) != 0)
+            return 77;
+        using var reportDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[1],
+            new WindowsWorkerMetadataPipe.MetadataReport(
+                WorkerRequest.CurrentVersion, requestId, 1),
+            reportDeadline.Token);
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+        System.ComponentModel.Win32Exception or OperationCanceledException or
+        TimeoutException or InvalidDataException)
+    {
+        return 78;
+    }
+}
+
 // Test-only codec subprocess: the launcher verifies AppContainer identity and
 // applies a two-member Job before any worker code executes. Only a synthetic
 // fixture with a dedicated Windows ACL is permitted by the test harness.
-if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg"))
+if ((args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffmpeg" ||
+    args[0] == "--process-metadata" || args[0] == "--process-decode")) ||
+    (args.Length == 4 && (args[0] == "--process-metadata-report" ||
+                          args[0] == "--probe-held-decode")))
 {
     if (!OperatingSystem.IsWindows() || !IsAppContainerProcess()) return 70;
     if (!Path.IsPathFullyQualified(args[1])) return 71;
-    string tool = args[0] == "--probe-ffmpeg" ? "ffmpeg.exe" : "ffprobe.exe";
+    string tool = args[0] is "--probe-ffmpeg" or "--process-decode" or "--probe-held-decode"
+        ? "ffmpeg.exe" : "ffprobe.exe";
     string executable = Path.Combine(AppContext.BaseDirectory, tool);
     if (!File.Exists(executable)) return 75;
     var start = new ProcessStartInfo(executable)
@@ -106,6 +180,9 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
         RedirectStandardError = true
     };
     if (tool == "ffmpeg.exe") start.ArgumentList.Add("-nostdin");
+    // Test-only forced-kill proof: keep a real decoder alive until its
+    // controller authenticates readiness and terminates the Job Object.
+    if (args[0] == "--probe-held-decode") start.ArgumentList.Add("-re");
     start.ArgumentList.Add("-v");
     start.ArgumentList.Add("error");
     start.ArgumentList.Add("-i");
@@ -127,7 +204,26 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
     {
         using var process = Process.Start(start);
         if (process is null) return 76;
-        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        if (args[0] == "--probe-held-decode")
+        {
+            if (!Guid.TryParseExact(args[3], "N", out Guid readyRequestId) ||
+                readyRequestId == Guid.Empty)
+                return 71;
+            await Task.Delay(150);
+            if (process.HasExited) return 77;
+            using var readyDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            await WindowsWorkerMetadataPipe.SubmitOnceAsync(args[2],
+                new WindowsWorkerMetadataPipe.MetadataReport(
+                    WorkerRequest.CurrentVersion, readyRequestId, 1), readyDeadline.Token);
+            // No success exit: only the controller's Job close may end both
+            // this worker and the real FFmpeg subprocess in this test.
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+            return 78;
+        }
+        // A genuine decode may exceed a brief diagnostic timeout on HDD.
+        // The controller Job enforces an outer 5-minute deadline.
+        using var cancel = new CancellationTokenSource(
+            TimeSpan.FromSeconds(args[0].StartsWith("--process-", StringComparison.Ordinal) ? 240 : 4));
         var output = process.StandardOutput.ReadToEndAsync(cancel.Token);
         var error = process.StandardError.ReadToEndAsync(cancel.Token);
         await process.WaitForExitAsync(cancel.Token);
@@ -142,8 +238,21 @@ if (args.Length == 2 && (args[0] == "--probe-ffprobe" || args[0] == "--probe-ffm
                 !double.TryParse(durationLine.Trim()["duration=".Length..],
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double duration) ||
-                duration is < 0.09 or > 0.11)
-                return 79; // ffprobe must decode metadata of the granted 0.10 s WAV.
+                (!double.IsFinite(duration) || (args[0] is "--process-metadata" or "--process-metadata-report" ? duration is <= 0 or > 604800 : duration is < 0.09 or > 0.11)))
+                return 79; // Reject missing or invalid metadata values.
+            if (args[0] == "--process-metadata-report")
+            {
+                if (!Guid.TryParseExact(args[3], "N", out Guid requestId) ||
+                    requestId == Guid.Empty ||
+                    !double.IsFinite(duration) || duration <= 0 || duration > 604800)
+                    return 71;
+                long ticks = checked((long)Math.Round(duration * TimeSpan.TicksPerSecond));
+                var report = new WindowsWorkerMetadataPipe.MetadataReport(
+                    WorkerRequest.CurrentVersion, requestId, ticks);
+                using var reportTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                await WindowsWorkerMetadataPipe.SubmitOnceAsync(
+                    args[2], report, reportTimeout.Token);
+            }
         }
         return 0;
     }

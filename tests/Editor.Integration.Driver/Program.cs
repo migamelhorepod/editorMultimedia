@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Editor.Timeline;
+using Editor.Security;
 
 // Test-only, local stdin/stdout adapter. No HTTP service or production UI changes.
 var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -8,6 +9,12 @@ var session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
 var projectId = Guid.NewGuid();
 EditorProject Project() => new(projectId, "Integração", session.Current, session.Media);
 var results = new List<object>();
+var importLifecycle = new MediaImportCoordinator(Guid.NewGuid());
+var activeTaskIds = new Stack<Guid>();
+var simulatedStoragePresent = true;
+var stoppedTasks = new List<Guid>();
+var monitor = new LibraryStorageMonitor(importLifecycle, Path.GetTempPath(), stoppedTasks.Add,
+    _ => simulatedStoragePresent);
 var commands = JsonNode.Parse(Console.In.ReadToEnd())!.AsArray();
 foreach (var command in commands)
 {
@@ -21,6 +28,40 @@ foreach (var command in commands)
     {
         switch (Text("op"))
         {
+            case "beginImportLifecycle":
+                activeTaskIds.Push(importLifecycle.BeginImport());
+                value = new { active = importLifecycle.ActiveImports, taskId = activeTaskIds.Peek() };
+                break;
+            case "finishImportLifecycle":
+                importLifecycle.CompleteImport(activeTaskIds.Pop());
+                value = new { active = importLifecycle.ActiveImports };
+                break;
+            case "changeLibraryLifecycle":
+                value = importLifecycle.TryChangeLibrary(Guid.NewGuid());
+                break;
+            case "deactivateLibraryLifecycle":
+                value = importLifecycle.TryChangeLibrary(null);
+                break;
+            case "diskOfflineLifecycle":
+                simulatedStoragePresent = false;
+                value = new { available = monitor.Check(), terminated = stoppedTasks.Count,
+                    active = importLifecycle.ActiveImports };
+                break;
+            case "diskOnlineLifecycle":
+                simulatedStoragePresent = true;
+                value = new { available = monitor.Check(), active = importLifecycle.ActiveImports };
+                break;
+            case "importPhysical":
+                var physicalCopy = await new LibraryFileStore(Text("library")).ImportAsync(Text("path"));
+                var registeredAsset = MediaReferences.InspectFile(physicalCopy.Path);
+                var inCatalog = session.Media.FirstOrDefault(m =>
+                    MediaReferences.SameSource(m.SourcePath, registeredAsset.SourcePath));
+                if (inCatalog is not null) { value = "duplicate"; break; }
+                var registeredClip = MediaReferences.PlanClip(session.Current, registeredAsset, Time(), Id());
+                session.Execute(s => TimelineEngine.Insert(s, s.Version, registeredClip),
+                    session.Media.Append(registeredAsset).ToArray());
+                value = physicalCopy.Path;
+                break;
             case "import":
                 var asset = MediaReferences.InspectFile(Text("path"));
                 var existing = session.Media.FirstOrDefault(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath));
@@ -49,6 +90,13 @@ foreach (var command in commands)
             case "delete": session.Execute(s => s.Find(Id()).Track == 0
                 ? TimelineEngine.DeleteMain(s, s.Version, Id()) : TimelineEngine.DeleteSecondary(s, s.Version, Id())); break;
             case "removeMedia": session.RemoveUnusedMedia(Id()); break;
+            case "deleteCatalog": session.DeleteCatalogMedia(Id("mediaId")); break;
+            case "deleteCatalogFirst":
+                session.DeleteCatalogMedia(session.Media.First().Id); break;
+            case "insertFirstCatalog":
+                var firstAsset = session.Media.First();
+                var secondClip = MediaReferences.PlanClip(session.Current, firstAsset, Time(), Id());
+                session.Execute(s => TimelineEngine.Insert(s, s.Version, secondClip)); break;
             case "relink": session.RelinkMedia(Id(), Text("path")); break;
             case "restore": session.FitClipToSource(Id()); break;
             case "undo": session.Undo(); break;

@@ -7,4 +7,8 @@
     <!-- Required by generated Windows P/Invoke stubs; app code does not access raw memory. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Expose security-policy helpers only to the automated test assembly. -->
+    <InternalsVisibleTo Include="Editor.Timeline.Tests" />
+  </ItemGroup>
 </Project>

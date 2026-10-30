@@ -27,13 +27,22 @@ jobs:
       - name: Compilar todos os projetos (inclui WPF)
         run: dotnet build EditorMultimidia.sln --configuration Release --no-restore
 
+      - name: Compilar ferramenta CMD de homologacao fisica Win11 D
+        run: dotnet build tools/Editor.PhysicalHomologation/Editor.PhysicalHomologation.csproj --configuration Release
+
       - name: Preparar FFmpeg e ffprobe reais
         shell: pwsh
         run: |
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
             $installed = $false
             for ($attempt = 1; $attempt -le 3; $attempt++) {
-              choco install ffmpeg --yes --no-progress --limit-output
+              try {
+                choco install ffmpeg --yes --no-progress --limit-output
+              } catch {
+                # A transient 5xx on Chocolatey may throw before the retry loop
+                # can inspect LASTEXITCODE. Keep the final failure fail-closed.
+                Write-Warning "Chocolatey attempt $attempt returned an error: $_"
+              }
               if ($LASTEXITCODE -eq 0) { $installed = $true; break }
               Write-Warning "FFmpeg repository unavailable (attempt $attempt of 3)."
               if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt) }
@@ -61,6 +70,14 @@ jobs:
           $source = $candidate[0].DirectoryName
           Copy-Item (Join-Path $source "ffprobe.exe") "TestResults/sandbox-worker/ffprobe.exe"
           Copy-Item (Join-Path $source "ffmpeg.exe") "TestResults/sandbox-worker/ffmpeg.exe"
+
+      - name: Empacotar worker real para aplicativo WPF
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/preparar-worker-appcontainer.ps1 -Configuration Release
+
+      - name: Regressao Windows PowerShell 5.1 - empacotamento Debug via CMD
+        shell: cmd
+        run: scripts\preparar-worker-appcontainer.cmd Debug
 
       - name: Conceder somente leitura e execucao do bundle ao AppContainer
         shell: pwsh
@@ -143,9 +160,13 @@ jobs:
         working-directory: tests/playwright
         run: npm run test:ci
 
+      - name: Auditar vulnerabilidades NuGet/npm, licencas e FFmpeg reais
+        shell: pwsh
+        run: ./tests/security/audit-dependencies.ps1
+
       - name: Publicar relatorios de testes
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: resultados-testes
           if-no-files-found: warn
@@ -154,6 +175,7 @@ jobs:
             TestResults/
             tests/playwright/playwright-report/
             tests/playwright/test-results/
+            TestResults/security-audit/
 
   poc0031-security-evidence:
     name: Security release gate — POC-003.1
@@ -165,7 +187,7 @@ jobs:
       - name: Obter codigo
         uses: actions/checkout@v5
       - name: Recuperar evidencias xUnit e WFP
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: resultados-testes
           path: .
@@ -175,9 +197,35 @@ jobs:
           ./tests/security/assert-poc0031-release-gate.ps1 -ResultsRoot "TestResults" -AuditPath "TestResults/sec-006-wfp-audit.json"
       - name: Publicar parecer auditavel
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: poc0031-gate-report
           if-no-files-found: warn
           retention-days: 14
           path: TestResults/poc0031-gate.json
+
+  poc0032-fd-research-evidence:
+    name: Seekable FD research gate — POC-003.2 (not production approval)
+    needs: build-test
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Recuperar TRX e auditoria de dependencias
+        uses: actions/download-artifact@v6
+        with:
+          name: resultados-testes
+          path: .
+      - name: Validar provas reais do adaptador seekable
+        shell: pwsh
+        run: ./tests/security/assert-poc0032-fd-research-gate.ps1
+      - name: Publicar gate experimental auditavel
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: poc0032-fd-research-gate
+          if-no-files-found: warn
+          retention-days: 14
+          path: TestResults/poc0032-fd-research-gate.json

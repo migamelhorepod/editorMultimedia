@@ -1,0 +1,107 @@
+namespace Editor.Security;
+
+/// <summary>
+/// Controller-facing, fail-closed entrypoint for the *real* Windows AppContainer
+/// metadata and decode operations. Each invocation is registered and granted
+/// only to the active library, exact file, exact operation and task lifetime.
+/// Worker binaries are never started outside the verified launcher.
+/// </summary>
+public sealed class IsolatedMediaProcessingService
+{
+    private readonly AccessGrantRegistry grants;
+    private readonly AuthorizedMediaCatalog catalog;
+    private readonly string workerExecutable;
+    private readonly string activeLibraryRoot;
+
+    public IsolatedMediaProcessingService(string activeLibraryRoot,
+        Guid activeLibraryId, string workerExecutable)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerExecutable);
+        if (!Path.IsPathFullyQualified(workerExecutable) ||
+            !string.Equals(Path.GetFileName(workerExecutable),
+                "Editor.Security.Worker.exe", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(workerExecutable))
+            throw new UnauthorizedAccessException("The verified AppContainer worker is not installed.");
+        string bundle = Path.GetDirectoryName(Path.GetFullPath(workerExecutable))!;
+        if (!File.Exists(Path.Combine(bundle, "ffprobe.exe")) ||
+            !File.Exists(Path.Combine(bundle, "ffmpeg.exe")))
+            throw new UnauthorizedAccessException("The isolated codec bundle is incomplete.");
+        this.workerExecutable = Path.GetFullPath(workerExecutable);
+        grants = new AccessGrantRegistry(activeLibraryId);
+        catalog = new AuthorizedMediaCatalog(activeLibraryRoot, grants);
+        this.activeLibraryRoot = Path.GetFullPath(activeLibraryRoot);
+        // Reclaim only crash-abandoned, exclusively leased codec copies.
+        // Active tasks in another instance retain the lease and are untouched.
+        RecoverAbandonedInputs();
+    }
+
+    public int RecoverAbandonedInputs() =>
+        WindowsScopedCodecInput.RecoverAbandoned(activeLibraryRoot);
+
+    public long InspectDurationTicks(string registeredMediaPath)
+    {
+        Guid task = Guid.NewGuid(), resource = Guid.NewGuid();
+        try
+        {
+            catalog.Register(resource, registeredMediaPath);
+            Guid grant = grants.Issue(task, grants.ActiveLibraryId, resource,
+                MediaAccessOperation.InspectMetadata, AccessGrantRegistry.MaxGrantLifetime);
+            var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
+                task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.InspectMetadata);
+            // Proven on Windows CI with WAV and MP4 moov-at-end: the real
+            // FFprobe reads an isolated, seekable kernel HANDLE directly.
+            // There is no proportional staging copy on the HDD.
+            return WindowsAppContainerLauncher.ProbeAuthorizedSeekableMetadataTicks(
+                workerExecutable, catalog, request);
+        }
+        finally
+        {
+            grants.RevokeTask(task);
+            catalog.Unregister(resource);
+        }
+    }
+
+    public void DecodeToNull(string registeredMediaPath)
+    {
+        Guid task = Guid.NewGuid(), resource = Guid.NewGuid();
+        try
+        {
+            catalog.Register(resource, registeredMediaPath);
+            Guid grant = grants.Issue(task, grants.ActiveLibraryId, resource,
+                MediaAccessOperation.ReadChunk, AccessGrantRegistry.MaxGrantLifetime);
+            var request = new WorkerRequest(WorkerRequest.CurrentVersion, Guid.NewGuid(),
+                task, grants.ActiveLibraryId, resource, grant, MediaAccessOperation.ReadChunk);
+            // Real Windows CI proved the isolated FFmpeg null-sink decoder
+            // consumes only an authorized seekable HANDLE, with no full-sized
+            // staging copy and no changes to the original file or its ACL.
+            try
+            {
+                WindowsAppContainerLauncher.ProbeAuthorizedSeekableDecode(
+                    workerExecutable, catalog, request);
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message.StartsWith("AppContainer worker exited with status ",
+                    StringComparison.Ordinal))
+            {
+                // Preserve the service contract for undecodable media:
+                // codec exit codes are errors in the input, never proof of
+                // authenticated success. The original IPC failure remains
+                // available as InnerException for diagnosis.
+                throw new InvalidDataException(
+                    "Isolated FFmpeg rejected the media. " + ex.Message, ex);
+            }
+        }
+        finally
+        {
+            grants.RevokeTask(task);
+            catalog.Unregister(resource);
+        }
+    }
+
+    /// <summary>
+    /// Do not expose raw worker paths or user-controlled command lines.
+    /// A closed service permanently rejects new task grants.
+    /// </summary>
+    public void RevokeAll() => grants.DeactivateLibrary();
+}

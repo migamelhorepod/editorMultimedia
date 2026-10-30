@@ -9,6 +9,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Editor.Timeline;
+using Editor.Security;
+using System.Windows.Threading;
+using System.Threading.Tasks;
 
 namespace Editor.Timeline.Wpf;
 
@@ -28,6 +31,12 @@ public partial class MainWindow : Window
     private IReadOnlyList<MediaAsset> savedMedia = Array.Empty<MediaAsset>();
     private readonly Dictionary<Guid, bool> availableMedia = new();
     private Guid? catalogSelectionId;
+    private readonly MediaImportCoordinator importCoordinator = new(Guid.NewGuid());
+    private LibraryStorageMonitor? libraryStorageMonitor;
+    // Start without using the entire D: volume as a media library.
+    private string libraryRootPath = string.Empty;
+    private readonly DispatcherTimer storageTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly Dictionary<Guid, IDisposable> activeWorkerJobs = new();
 
     // A project catalog entry may have zero, one or many timeline occurrences.
     private sealed record MediaListItem(MediaAsset Asset, int Usages, bool Missing)
@@ -87,17 +96,65 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        importCoordinator.TryChangeLibrary(null);
+        storageTimer.Tick += (_, _) =>
+        {
+            if (libraryStorageMonitor is null) return;
+            if (!libraryStorageMonitor.Check())
+            {
+                foreach (var media in mediaAssets)
+                {
+                    if (media.SourcePath.StartsWith(libraryRootPath, StringComparison.OrdinalIgnoreCase))
+                        availableMedia[media.Id] = false;
+                }
+                Draw();
+            }
+        };
+        storageTimer.Start();
         session = new TimelineSession(new TimelineState(0, Array.Empty<Clip>()));
         savedState = session.Current;
         projectId = Guid.NewGuid();
         InitializeClipActionsToolbar();
         UpdateWindowTitle();
         Draw();
+        Status.Text = "Selecione uma pasta em Arquivo > Ativar outra biblioteca antes de importar mídias.";
+    }
+
+    private bool EnsureEditorIdle()
+    {
+        if (importCoordinator.CanMutateProject) return true;
+        ShowBusyLibraryModal();
+        return false;
+    }
+
+    private void UpdateProcessingControls()
+    {
+        bool idle = importCoordinator.CanMutateProject;
+        FileOperationsMenu.IsEnabled = idle;
+        EditingToolbar.IsEnabled = idle;
+        LibraryControls.IsEnabled = idle;
+        Viewport.IsEnabled = idle;
+        if (!idle)
+            Status.Text = "Importação em andamento. Aguarde antes de modificar o projeto.";
+    }
+
+    private Guid BeginTrackedImport()
+    {
+        importCoordinator.DemandProjectMutationAllowed();
+        Guid task = importCoordinator.BeginImport();
+        UpdateProcessingControls();
+        return task;
+    }
+
+    private void CompleteTrackedImport(Guid task)
+    {
+        try { importCoordinator.CompleteImport(task); }
+        finally { UpdateProcessingControls(); }
     }
 
     private void UpdateWindowTitle()
     {
-        Title = $"Editor Multimídia — {projectName}{(hasUnsavedChanges ? " *" : "")} — POC-001";
+        Title = $"Editor Multimídia — {projectName}{(hasUnsavedChanges ? " *" : "")} — POC-003.2 (TM-06 corrigido)";
     }
 
     private void UpdateDirty()
@@ -118,6 +175,7 @@ public partial class MainWindow : Window
     // Save is intentionally explicit: there is no timer, auto-save or write on close.
     private bool SaveProject(bool choosePath = false)
     {
+        if (!EnsureEditorIdle()) return false;
         var destination = choosePath ? null : projectPath;
         if (destination is null)
         {
@@ -171,6 +229,7 @@ public partial class MainWindow : Window
 
     private void ResetLoadedProject(EditorProject project, string? path)
     {
+        importCoordinator.DemandProjectMutationAllowed();
         // A replacement is committed only after the file was fully parsed and validated.
         session = new TimelineSession(project.Timeline, project.MediaItems);
         projectId = project.Id;
@@ -203,6 +262,7 @@ public partial class MainWindow : Window
 
     private void NewProject_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         if (!ConfirmBeforeReplacingProject()) return;
         ResetLoadedProject(new EditorProject(Guid.NewGuid(), "Projeto sem título",
             new TimelineState(0, Array.Empty<Clip>())), null);
@@ -210,12 +270,14 @@ public partial class MainWindow : Window
 
     private void NewDemo_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         if (!ConfirmBeforeReplacingProject()) return;
         ResetLoadedProject(new EditorProject(Guid.NewGuid(), "Demonstração", CreateDemo()), null);
     }
 
     private void OpenProject_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         if (!ConfirmBeforeReplacingProject()) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -257,8 +319,15 @@ public partial class MainWindow : Window
             missing == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
-    private void ImportMedia_Click(object sender, RoutedEventArgs e)
+    private async void ImportMedia_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
+        if (libraryStorageMonitor is null || !libraryStorageMonitor.Check())
+        {
+            MessageBox.Show(this, "A biblioteca ativa está indisponível. Verifique a pasta no disco D:.",
+                "Biblioteca indisponível", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         var picker = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Selecionar arquivos de vídeo, áudio ou imagem",
@@ -267,6 +336,10 @@ public partial class MainWindow : Window
         };
         if (picker.ShowDialog(this) != true) return;
 
+        var importTask = BeginTrackedImport();
+        ImportStatus.Text = "Importação em andamento — aguarde a conclusão. O processamento não pode ser cancelado.";
+        try
+        {
         var added = 0;
         var ignored = 0;
         var errors = new List<string>();
@@ -274,7 +347,33 @@ public partial class MainWindow : Window
         {
             try
             {
-                var asset = MediaReferences.InspectFile(path);
+                // External media is first copied into the active physical library
+                // with a private partial file and an atomic final rename.
+                var stored = await new LibraryFileStore(libraryRootPath).ImportAsync(path);
+                MediaAsset asset;
+                try
+                {
+                    // All actual probing/decoding of new media executes in the
+                    // verified AppContainer worker; never in the WPF process.
+                    asset = await InspectLibraryAssetInSandboxAsync(stored.Path);
+                }
+                catch (Exception ex) when (ex is MediaReferenceException or
+                    NotSupportedException or InvalidDataException or ArgumentException or
+                    UnauthorizedAccessException or IOException or InvalidOperationException or
+                    Win32Exception or System.Runtime.InteropServices.COMException)
+                {
+                    // An invalid NEW import must not pollute the library.
+                    // Existing/reused media and the original are never deleted.
+                    if (stored.NewlyCopied)
+                    {
+                        try { if (File.Exists(stored.Path)) File.Delete(stored.Path); }
+                        catch (IOException) { /* The import error remains primary. */ }
+                        catch (UnauthorizedAccessException) { /* Cleanup may retry during maintenance. */ }
+                    }
+                    throw;
+                }
+                if (libraryStorageMonitor is not null && !libraryStorageMonitor.Check())
+                    throw new IOException("Biblioteca indisponível durante a importação.");
                 if (mediaAssets.Any(m => MediaReferences.SameSource(m.SourcePath, asset.SourcePath)))
                 {
                     ignored++;
@@ -292,7 +391,8 @@ public partial class MainWindow : Window
                 added++;
             }
             catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-                IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+                IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException or
+                Win32Exception or System.Runtime.InteropServices.COMException or InvalidOperationException)
             {
                 errors.Add($"{System.IO.Path.GetFileName(path)}: {ex.Message}");
             }
@@ -304,11 +404,41 @@ public partial class MainWindow : Window
         var issueText = errors.Count == 0 ? "" : "\n\nNão importados:\n" +
             string.Join("\n", errors.Take(10));
         MessageBox.Show(this,
-            $"{added} arquivo(s) vinculado(s) à timeline",
+            $"{added} arquivo(s) vinculado(s) à timeline{duplicateMessage}{issueText}",
             "Importação de mídias", MessageBoxButton.OK,
             errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        }
+        finally
+        {
+            CompleteTrackedImport(importTask);
+            ImportStatus.Text = "";
+        }
     }
 
+
+    /// <summary>Only the isolated worker opens and decodes the media.</summary>
+    private Task<MediaAsset> InspectLibraryAssetInSandboxAsync(string sourcePath)
+    {
+        string activeRoot = libraryRootPath;
+        Guid activeLibraryId = importCoordinator.ActiveLibrary;
+        return Task.Run(() =>
+        {
+            if (!MediaReferences.TryDetectKind(sourcePath, out var kind))
+                throw new MediaReferenceException("Extensão não suportada.");
+            var file = new FileInfo(sourcePath);
+            if (!file.Exists || file.Length <= 0)
+                throw new MediaReferenceException("Arquivo indisponível ou vazio.");
+            var worker = System.IO.Path.Combine(AppContext.BaseDirectory,
+                "worker", "Editor.Security.Worker.exe");
+            var service = new IsolatedMediaProcessingService(activeRoot, activeLibraryId, worker);
+            long? measured = null;
+            if (kind is MediaKind.Video or MediaKind.Audio)
+                measured = service.InspectDurationTicks(file.FullName);
+            else
+                service.DecodeToNull(file.FullName);
+            return new MediaAsset(Guid.NewGuid(), kind, file.Name, file.FullName, file.Length, measured);
+        });
+    }
 
     private MediaAsset? CatalogSelection() =>
         (MediaList?.SelectedItem as MediaListItem)?.Asset;
@@ -350,8 +480,8 @@ public partial class MainWindow : Window
     private void UpdateCatalogActions()
     {
         if (InsertMediaButton is null || LocateMediaButton is null ||
-            RelinkMediaButton is null || RemoveMediaButton is null ||
-            RefreshMetadataButton is null || FitSelectedClipButton is null) return;
+            RelinkMediaButton is null || RefreshMetadataButton is null ||
+            FitSelectedClipButton is null) return;
         var item = MediaList?.SelectedItem as MediaListItem;
         var hasSelected = item is not null;
         var uses = item?.Usages ?? 0;
@@ -359,17 +489,6 @@ public partial class MainWindow : Window
         LocateMediaButton.IsEnabled = uses > 0;
         RelinkMediaButton.IsEnabled = hasSelected;
         RefreshMetadataButton.IsEnabled = hasSelected && !item!.Missing;
-        RemoveMediaButton.IsEnabled = hasSelected && uses == 0;
-        RemoveMediaButton.Content = !hasSelected
-            ? "Remover do catálogo"
-            : uses == 0
-                ? "Remover do catálogo (sem clipes)"
-                : $"Em uso: {uses} clipe(s) — não remover do catálogo";
-        RemoveMediaButton.ToolTip = !hasSelected
-            ? "Selecione uma mídia da biblioteca do projeto"
-            : uses == 0
-                ? "Remove a referência da biblioteca"
-                : $"Não é possível remover: {uses} clipe(s) ainda estão em uso na timeline";
         var selectedClip = Selected();
         FitSelectedClipButton.IsEnabled = selectedClip is { Kind: MediaKind.Video or MediaKind.Audio } &&
             mediaAssets.Any(m => m.Id == selectedClip.MediaId);
@@ -399,6 +518,7 @@ public partial class MainWindow : Window
 
     private void InsertFromCatalog_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         var asset = CatalogSelection();
         if (asset is null) return;
         if (!MediaReferences.IsAvailable(asset))
@@ -441,53 +561,135 @@ public partial class MainWindow : Window
         Viewport.ScrollToVerticalOffset(Math.Max(0, Y(clip.Track) - RulerHeight));
     }
 
-    private void RemoveUnusedMedia_Click(object sender, RoutedEventArgs e)
+    private void MediaList_RightClick(object sender, MouseButtonEventArgs e)
     {
-        var asset = CatalogSelection();
-        if (asset is null) return;
+        if (e.OriginalSource is not DependencyObject origin) return;
+        var container = ItemsControl.ContainerFromElement(MediaList, origin) as ListBoxItem;
+        if (container?.DataContext is not MediaListItem item) return;
+        MediaList.SelectedItem = item;
+        catalogSelectionId = item.Asset.Id;
+        var menu = new ContextMenu
+        {
+            PlacementTarget = container,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint
+        };
+        var delete = new MenuItem { Header = "Excluir" };
+        var mediaId = item.Asset.Id;
+        delete.Click += (_, _) => DeleteCatalogMedia(mediaId);
+        menu.Items.Add(delete);
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private bool ConfirmCatalogDeletion()
+    {
+        var prompt = new Window
+        {
+            Title = "Confirmar exclusão",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = 470,
+            ShowInTaskbar = false
+        };
+        var body = new StackPanel { Margin = new Thickness(20) };
+        body.Children.Add(new TextBlock
+        {
+            Text = "Se a mídia for excluída do catálogo, também será removida da timeline, quer mesmo excluir?",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 510,
+            Margin = new Thickness(0, 0, 0, 18)
+        });
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        var cancel = new Button { Content = "Cancelar", MinWidth = 95, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var confirm = new Button { Content = "Confirmar", MinWidth = 95, IsDefault = true };
+        cancel.Click += (_, _) => prompt.DialogResult = false;
+        confirm.Click += (_, _) => prompt.DialogResult = true;
+        actions.Children.Add(cancel);
+        actions.Children.Add(confirm);
+        body.Children.Add(actions);
+        prompt.Content = body;
+        return prompt.ShowDialog() == true;
+    }
+
+    private void DeleteCatalogMedia(Guid mediaId)
+    {
+        if (!EnsureEditorIdle()) return;
+        var media = mediaAssets.FirstOrDefault(m => m.Id == mediaId);
+        if (media is null) return;
+        var used = session.Current.Clips.Any(c => c.MediaId == mediaId);
+        if (used)
+        {
+            if (!ConfirmCatalogDeletion()) return;
+        }
         try
         {
-            session.RemoveUnusedMedia(asset.Id);
+            session.DeleteCatalogMedia(mediaId);
             mediaAssets = session.Media.ToList();
-            availableMedia.Remove(asset.Id);
-            catalogSelectionId = null;
+            availableMedia.Remove(mediaId);
+            if (catalogSelectionId == mediaId) catalogSelectionId = null;
+            if (selectedId is Guid clipId && session.Current.Clips.All(c => c.Id != clipId))
+                selectedId = null;
             UpdateDirty();
             Draw();
         }
-        catch (MediaReferenceException ex)
+        catch (Exception ex) when (ex is MediaReferenceException or TimelineException)
         {
-            MessageBox.Show(this, ex.Message, "Operação não permitida",
+            MessageBox.Show(this, ex.Message, "Não foi possível excluir",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
-    private void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
+    private async void RefreshCatalogMetadata_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         var asset = CatalogSelection();
         if (asset is null) return;
+        Guid? operation = null;
         try
         {
-            session.RefreshMediaMetadata(asset.Id);
+            operation = BeginTrackedImport();
+            ImportStatus.Text = "Atualizando metadados no worker AppContainer...";
+            var inspected = await InspectLibraryAssetInSandboxAsync(asset.SourcePath);
+            session.RefreshMediaMetadataInspected(asset.Id, inspected);
             mediaAssets = session.Media.ToList();
             availableMedia[asset.Id] = MediaReferences.IsAvailable(asset);
             UpdateDirty();
             Draw();
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or
+            Win32Exception or System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
             MessageBox.Show(this, ex.Message, "Não foi possível atualizar os dados",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        finally
+        {
+            if (operation is Guid task) CompleteTrackedImport(task);
+            ImportStatus.Text = "";
+        }
     }
 
-    private void FitSelectedClip_Click(object sender, RoutedEventArgs e)
+    private async void FitSelectedClip_Click(object sender, RoutedEventArgs e)
     {
+        if (!EnsureEditorIdle()) return;
         var clip = Selected();
         if (clip is null) return;
+        Guid? operation = null;
         try
         {
-            session.FitClipToSource(clip.Id);
+            var asset = mediaAssets.FirstOrDefault(m => m.Id == clip.MediaId)
+                ?? throw new MediaReferenceException("Mídia não vinculada ao catálogo.");
+            operation = BeginTrackedImport();
+            ImportStatus.Text = "Aferindo duração real no worker AppContainer...";
+            var inspected = await InspectLibraryAssetInSandboxAsync(asset.SourcePath);
+            session.FitClipToMeasuredSource(clip.Id, inspected);
             mediaAssets = session.Media.ToList();
             RefreshMediaPresence();
             UpdateDirty();
@@ -495,11 +697,15 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
             IOException or UnauthorizedAccessException or ArgumentException or
-            NotSupportedException or OverflowException)
+            NotSupportedException or OverflowException or Win32Exception or
+            System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
-            // Context-menu timeline actions do not interrupt the editor with
-            // dialogs. Failure is atomic; keep the source and current edits.
-            System.Diagnostics.Debug.WriteLine($"Restaurar duração original: {ex}");
+            System.Diagnostics.Debug.WriteLine($"Restaurar duração original via worker: {ex}");
+        }
+        finally
+        {
+            if (operation is Guid task) CompleteTrackedImport(task);
+            ImportStatus.Text = "";
         }
     }
 
@@ -517,8 +723,9 @@ public partial class MainWindow : Window
         if (media is not null) RelinkAsset(media);
     }
 
-    private void RelinkAsset(MediaAsset media)
+    private async void RelinkAsset(MediaAsset media)
     {
+        if (!EnsureEditorIdle()) return;
         var filter = media.Kind switch
         {
             MediaKind.Video => "Arquivos de vídeo|*.mp4;*.mov;*.mkv;*.avi;*.webm",
@@ -533,28 +740,112 @@ public partial class MainWindow : Window
             CheckFileExists = true, Multiselect = false
         };
         if (dialog.ShowDialog(this) != true) return;
+        Guid? operation = null;
         try
         {
-            session.RelinkMedia(media.Id, dialog.FileName);
+            operation = BeginTrackedImport();
+            ImportStatus.Text = "Relocalizando e verificando mídia no worker AppContainer...";
+            // A relinked external file must enter the active physical library
+            // before any codec is allowed to inspect it.
+            var stored = await new LibraryFileStore(libraryRootPath).ImportAsync(dialog.FileName);
+            var verified = await InspectLibraryAssetInSandboxAsync(stored.Path);
+            session.RelinkMediaInspected(media.Id, verified);
             mediaAssets = session.Media.ToList();
             RefreshMediaPresence();
             UpdateDirty();
             Draw();
         }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or
-            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OverflowException)
+            IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or
+            OverflowException or Win32Exception or System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
             MessageBox.Show(this,
                 $"Não foi possível relocalizar a mídia, a referência original foi preservada\n{ex.Message}",
                 "Relocalização não realizada", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (operation is Guid task) CompleteTrackedImport(task);
+            ImportStatus.Text = "";
         }
     }
 
     private void SaveProject_Click(object sender, RoutedEventArgs e) => SaveProject();
     private void SaveAsProject_Click(object sender, RoutedEventArgs e) => SaveProject(choosePath: true);
 
+    private LibraryStorageMonitor CreateStorageMonitor(string root) =>
+        new(importCoordinator, root, id =>
+        {
+            if (activeWorkerJobs.Remove(id, out var job)) job.Dispose();
+        });
+
+    private void RecoverLibraryCopiesAtStartup()
+    {
+        if (libraryStorageMonitor is null || !libraryStorageMonitor.Check()) return;
+        try
+        {
+            int removed = new LibraryFileStore(libraryRootPath).RecoverInterruptedImports();
+            if (removed > 0)
+                MessageBox.Show(this,
+                    $"{removed} importação(ões) interrompida(s) foram descartadas. Nenhuma mídia concluída foi apagada.",
+                    "Recuperação da biblioteca", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, "Não foi possível recuperar importações interrompidas: " + ex.Message,
+                "Recuperação da biblioteca", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ChangeLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        if (importCoordinator.ActiveImports > 0)
+        {
+            ShowBusyLibraryModal();
+            return;
+        }
+        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "Selecionar biblioteca de mídias" };
+        if (picker.ShowDialog(this) != true) return;
+        string selectedRoot;
+        try
+        {
+            selectedRoot = LibraryRootPolicy.ValidateUserSelected(picker.FolderName);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or
+            UnauthorizedAccessException or NotSupportedException)
+        {
+            MessageBox.Show(this, ex.Message, "Biblioteca inválida",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var result = importCoordinator.TryChangeLibrary(Guid.NewGuid());
+        if (!result.Allowed) { ShowBusyLibraryModal(); return; }
+        libraryRootPath = selectedRoot;
+        libraryStorageMonitor = CreateStorageMonitor(selectedRoot);
+        libraryStorageMonitor.Check();
+        RecoverLibraryCopiesAtStartup();
+        Status.Text = "Biblioteca ativa: " + selectedRoot;
+    }
+
+    private void DeactivateLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        var result = importCoordinator.TryChangeLibrary(null);
+        if (!result.Allowed) { ShowBusyLibraryModal(); return; }
+        libraryStorageMonitor = null;
+    }
+
+    private void ShowBusyLibraryModal() =>
+        MessageBox.Show(this, MediaImportCoordinator.BusyMessage,
+            "Biblioteca em processamento", MessageBoxButton.OK, MessageBoxImage.Information);
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (importCoordinator.ActiveImports > 0)
+        {
+            e.Cancel = true;
+            ShowBusyLibraryModal();
+            return;
+        }
         if (!ConfirmBeforeReplacingProject()) e.Cancel = true;
     }
 
@@ -1174,6 +1465,12 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Keyboard shortcuts must not bypass disabled editing controls.
+        if (!importCoordinator.CanMutateProject)
+        {
+            e.Handled = true;
+            return;
+        }
         // Text inputs own typing, arrows, Delete and local Ctrl+Z.
         // The app-level open/new/import/save shortcuts remain accessible.
         if (Keyboard.FocusedElement is TextBox or ComboBox)
@@ -1384,7 +1681,7 @@ public partial class MainWindow : Window
         var duplicate = MakeClipMenuItem("Duplicar", "copy", Duplicate_Click);
         duplicate.IsEnabled = clip.Track != TimelineEngine.MainTrack;
         menu.Items.Add(duplicate);
-        menu.Items.Add(MakeClipMenuItem("Excluir este clipe da timeline", "trash", Delete_Click));
+        menu.Items.Add(MakeClipMenuItem("Excluir", "trash", Delete_Click));
         var independent = MakeClipMenuItem("Tornar independente", "unlink", Independent_Click);
         independent.IsEnabled = clip.Track != TimelineEngine.MainTrack && clip.Association == AssociationKind.Positioned;
         menu.Items.Add(independent);
@@ -1457,6 +1754,7 @@ public partial class MainWindow : Window
 
     private void Run(Func<TimelineState, CommandResult> operation)
     {
+        if (!importCoordinator.CanMutateProject) return;
         try { session.Execute(operation); UpdateDirty(); }
         catch (Exception ex) when (ex is MediaReferenceException or TimelineException or OverflowException)
         {
@@ -1469,6 +1767,7 @@ public partial class MainWindow : Window
     private Clip? Selected() => selectedId is Guid id ? session.Current.Clips.FirstOrDefault(c => c.Id == id) : null;
     private void Undo_Click(object sender, RoutedEventArgs e)
     {
+        if (!importCoordinator.CanMutateProject) return;
         if (!session.CanUndo) return;
         session.Undo();
         mediaAssets = session.Media.ToList();
@@ -1480,6 +1779,7 @@ public partial class MainWindow : Window
 
     private void Redo_Click(object sender, RoutedEventArgs e)
     {
+        if (!importCoordinator.CanMutateProject) return;
         if (!session.CanRedo) return;
         session.Redo();
         mediaAssets = session.Media.ToList();

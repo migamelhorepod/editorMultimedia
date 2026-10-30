@@ -2,11 +2,13 @@
 <DockPanel>
   <StackPanel DockPanel.Dock="Top" Orientation="Vertical">
     <Menu Background="#242A39" Foreground="#EDF0F6">
-      <MenuItem Header="_Arquivo">
+      <MenuItem x:Name="FileOperationsMenu" Header="_Arquivo">
         <MenuItem Header="Novo projeto vazio" Click="NewProject_Click" InputGestureText="Ctrl+N"/>
         <MenuItem Header="Carregar demonstração" Click="NewDemo_Click"/>
         <MenuItem Header="Abrir projeto..." Click="OpenProject_Click" InputGestureText="Ctrl+O"/>
         <MenuItem Header="Importar mídias..." Click="ImportMedia_Click" InputGestureText="Ctrl+I"/>
+        <MenuItem Header="Ativar outra biblioteca..." Click="ChangeLibrary_Click"/>
+        <MenuItem Header="Desativar biblioteca" Click="DeactivateLibrary_Click"/>
         <MenuItem Header="Verificar mídias vinculadas" Click="CheckMedia_Click"/>
         <MenuItem Header="Relocalizar mídia selecionada..." Click="RelinkSelectedMedia_Click"/>
         <Separator/>
@@ -15,7 +17,7 @@
       </MenuItem>
     </Menu>
     <Border Background="#252B3A" Padding="14"><StackPanel><TextBlock Text="EDITOR MULTIMÍDIA  /  POC-001" FontSize="18" FontWeight="Bold"/><TextBlock Text="Timeline interativa · .NET 10 · WPF · sem reprodução de vídeo" Foreground="#B5C0D2" Margin="0,4,0,0"/></StackPanel></Border>
-    <WrapPanel Margin="12,10,12,8" VerticalAlignment="Center">
+    <WrapPanel x:Name="EditingToolbar" Margin="12,10,12,8" VerticalAlignment="Center">
       <Button Click="SaveProject_Click" ToolTip="Salvar projeto (Ctrl+S)" Margin="0,0,15,6" Padding="8,6" MinWidth="38" AutomationProperties.Name="Salvar projeto">
         <Viewbox Width="18" Height="18"><Canvas Width="24" Height="24"><Path Fill="#EDF0F6" Data="M17 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.3 19 9 17.7 9 16S10.3 13 12 13 15 14.3 15 16 13.7 19 12 19ZM6 5H16V10H6V5ZM14 6H16V9H14V6Z"/></Canvas></Viewbox>
       </Button>
@@ -51,7 +53,7 @@
       <ColumnDefinition Width="*"/>
     </Grid.ColumnDefinitions>
     <Border Grid.Column="0" Background="#1C2230" BorderBrush="#3A4657" BorderThickness="0,0,1,0" Padding="10">
-      <DockPanel>
+      <DockPanel x:Name="LibraryControls">
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
           <TextBlock Text="MÍDIAS DO PROJETO" FontSize="14" FontWeight="Bold" Margin="0,0,0,8"/>
           <TextBox x:Name="MediaSearchBox" ToolTip="Buscar mídia pelo nome ou caminho" TextChanged="MediaSearch_Changed"
@@ -68,6 +70,7 @@
             <Button x:Name="InsertMediaButton" Content="Usar no cursor" Click="InsertFromCatalog_Click"
                     ToolTip="Inserir mais uma ocorrência da mídia, sem importar de novo" IsEnabled="False" Padding="9,5" Margin="0,0,0,6"/>
           </WrapPanel>
+          <TextBlock x:Name="ImportStatus" Text="" Foreground="#F6D17C" Margin="0,0,0,6" TextWrapping="Wrap"/>
           <WrapPanel>
             <Button x:Name="LocateMediaButton" Content="Localizar clipe" Click="LocateCatalogClip_Click"
                     IsEnabled="False" Padding="8,5" Margin="0,0,6,6"/>
@@ -83,13 +86,11 @@
                   ToolTip="Restaura a duração original da mídia, preservando os demais cortes na timeline"
                   IsEnabled="False" Padding="8,5" Margin="0,0,0,6"
                   HorizontalAlignment="Left"/>
-          <Button x:Name="RemoveMediaButton" Content="Remover do catálogo" Click="RemoveUnusedMedia_Click"
-                  ToolTipService.ShowOnDisabled="True"
-                  ToolTip="Exclui somente a referência do catálogo, não apaga clipes na timeline, nem o arquivo original"
-                  IsEnabled="False" Padding="8,5" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+
           <TextBlock x:Name="MediaSummary" Text="0 mídias" Foreground="#B5C0D2" Margin="0,6,0,0" FontSize="11"/>
         </StackPanel>
         <ListBox x:Name="MediaList" SelectionChanged="MediaSelection_Changed"
+                 PreviewMouseRightButtonDown="MediaList_RightClick"
                  MouseDoubleClick="MediaList_MouseDoubleClick"
                  Background="#1C2230" BorderBrush="#3A4657"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">

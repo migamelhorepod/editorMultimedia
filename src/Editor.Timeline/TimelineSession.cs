@@ -70,6 +70,68 @@ public sealed class TimelineSession
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
     }
 
+    /// <summary>Apply already verified worker metadata without probing media in the editor process.</summary>
+    public void RefreshMediaMetadataInspected(Guid mediaId, MediaAsset inspected)
+    {
+        var previous = Media.FirstOrDefault(m => m.Id == mediaId)
+            ?? throw new MediaReferenceException("Mídia não encontrada no catálogo.");
+        if (previous.Kind != inspected.Kind ||
+            !MediaReferences.SameSource(previous.SourcePath, inspected.SourcePath))
+            throw new MediaReferenceException("Arquivo ou tipo não corresponde à mídia atual.");
+        var next = Media.Select(m => m.Id == mediaId ? inspected with { Id = mediaId } : m).ToArray();
+        if (Media.SequenceEqual(next)) return;
+        Execute(s => new CommandResult(
+            s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
+    /// <summary>Relink to worker-verified replacement, preserving the media ID and undo history.</summary>
+    public void RelinkMediaInspected(Guid mediaId, MediaAsset inspected)
+    {
+        var previous = Media.FirstOrDefault(m => m.Id == mediaId)
+            ?? throw new MediaReferenceException("Mídia não encontrada no catálogo.");
+        if (previous.Kind != inspected.Kind)
+            throw new MediaReferenceException("Selecione uma mídia do mesmo tipo.");
+        if (inspected.Kind is MediaKind.Video or MediaKind.Audio &&
+            inspected.DurationTicks is null)
+            throw new MediaReferenceException("A duração da substituta não foi aferida pelo worker.");
+        if (Media.Any(m => m.Id != mediaId &&
+            MediaReferences.SameSource(m.SourcePath, inspected.SourcePath)))
+            throw new MediaReferenceException("A mídia substituta já existe no catálogo.");
+        var next = Media.Select(m => m.Id == mediaId ? inspected with { Id = mediaId } : m).ToArray();
+        if (Media.SequenceEqual(next)) return;
+        Execute(s => new CommandResult(
+            s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
+    /// <summary>Restore trim using metadata supplied by the verified AppContainer worker.</summary>
+    public void FitClipToMeasuredSource(Guid clipId, MediaAsset inspected)
+    {
+        var clip = Current.Find(clipId);
+        if (clip.Kind == MediaKind.Image)
+            throw new MediaReferenceException("Imagens possuem duração editável.");
+        var asset = Media.FirstOrDefault(m => m.Id == clip.MediaId)
+            ?? throw new MediaReferenceException("Mídia não vinculada ao projeto.");
+        if (asset.Kind != inspected.Kind ||
+            !MediaReferences.SameSource(asset.SourcePath, inspected.SourcePath) ||
+            inspected.DurationTicks is not long ticks)
+            throw new MediaReferenceException("Os metadados da mídia não foram confirmados pelo worker.");
+        var refreshed = Media.Select(m => m.Id == asset.Id ? inspected with { Id = asset.Id } : m).ToArray();
+        if (clip.Duration.Ticks == ticks && clip.SourceStart == MediaTime.Zero &&
+            Media.SequenceEqual(refreshed)) return;
+        var desired = new MediaTime(ticks);
+        Execute(state =>
+        {
+            var adjusted = clip.Track == TimelineEngine.MainTrack
+                ? TimelineEngine.RestoreMainDuration(state, state.Version, clip.Id, desired)
+                : TimelineEngine.RestoreSecondaryDuration(state, state.Version, clip.Id, desired);
+            var nextClips = adjusted.State.Clips.Select(c => c.Id == clip.Id
+                ? c with { SourceStart = MediaTime.Zero } : c).ToArray();
+            var next = adjusted.State with { Clips = nextClips };
+            TimelineEngine.Validate(next);
+            return adjusted with { State = next };
+        }, refreshed);
+    }
+
     /// <summary>
     /// Explicitly replace a clip's current trim with the measured source duration.
     /// Also refresh old project metadata if needed. Both changes form one undo
@@ -116,6 +178,40 @@ public sealed class TimelineSession
         var next = MediaReferences.RemoveUnused(Media, Current, mediaId);
         Execute(s => new CommandResult(
             s with { Version = checked(s.Version + 1) }, Array.Empty<Guid>()), next);
+    }
+
+    /// <summary>
+    /// Remove one asset and every occurrence on the timeline as one undoable
+    /// project change. Source files on disk are never deleted.
+    /// </summary>
+    public void DeleteCatalogMedia(Guid mediaId)
+    {
+        if (!Media.Any(m => m.Id == mediaId))
+            throw new MediaReferenceException("Mídia não encontrada no catálogo.");
+        var nextMedia = Media.Where(m => m.Id != mediaId).ToArray();
+        Execute(state =>
+        {
+            var working = state;
+            var affected = new HashSet<Guid>();
+            // Delete main occurrences first so the same reflow/detachment
+            // semantics as normal timeline deletion are preserved.
+            var ids = state.Clips.Where(c => c.MediaId == mediaId)
+                .OrderBy(c => c.Track == TimelineEngine.MainTrack ? 0 : 1)
+                .ThenBy(c => c.Start.Ticks)
+                .Select(c => c.Id).ToArray();
+            foreach (var id in ids)
+            {
+                var clip = working.Find(id);
+                var result = clip.Track == TimelineEngine.MainTrack
+                    ? TimelineEngine.DeleteMain(working, working.Version, id)
+                    : TimelineEngine.DeleteSecondary(working, working.Version, id);
+                working = result.State;
+                affected.UnionWith(result.ChangedClipIds);
+            }
+            working = working with { Version = checked(state.Version + 1) };
+            TimelineEngine.Validate(working);
+            return new CommandResult(working, affected.ToArray());
+        }, nextMedia);
     }
 
     public TimelineState Undo()

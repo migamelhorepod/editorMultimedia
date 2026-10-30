@@ -1,0 +1,39 @@
+name: Gerador RF64 — smoke de midia grande (sem 10GB no runner)
+
+on:
+  push:
+    paths:
+      - 'tools/Editor.LargeMediaFixture/**'
+      - 'tests/gerar-midia-10gb.cmd'
+      - '.github/workflows/rf64-generator-smoke.yml'
+  pull_request:
+    paths:
+      - 'tools/Editor.LargeMediaFixture/**'
+      - 'tests/gerar-midia-10gb.cmd'
+      - '.github/workflows/rf64-generator-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v5
+      - name: Preparar .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Criar fixture RF64 de 8MiB (smoke real)
+        shell: cmd
+        run: dotnet run --project tools\Editor.LargeMediaFixture\Editor.LargeMediaFixture.csproj --configuration Release -- --ci-smoke
+      - name: Guardar evidencia pequena
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rf64-small-smoke-evidence
+          path: TestResults/rf64-generator-smoke/**/synthetic-rf64-evidence.json
+          retention-days: 14
+          if-no-files-found: warn
