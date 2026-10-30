@@ -75,6 +75,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/preparar-worker-appcontainer.ps1 -Configuration Release
 
+      - name: Regressao Windows PowerShell 5.1 - empacotamento Debug via CMD
+        shell: cmd
+        run: scripts\preparar-worker-appcontainer.cmd Debug
+
       - name: Conceder somente leitura e execucao do bundle ao AppContainer
         shell: pwsh
         run: |
