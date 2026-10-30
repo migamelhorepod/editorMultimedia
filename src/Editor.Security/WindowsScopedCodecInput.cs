@@ -143,6 +143,15 @@ internal sealed class WindowsScopedCodecInput : IDisposable
         if (!System.IO.Path.IsPathFullyQualified(libraryRoot))
             throw new ArgumentException("Absolute active library required.", nameof(libraryRoot));
         var root = System.IO.Path.GetFullPath(libraryRoot);
+        // Never recursively enumerate the entire drive (e.g. D:\\WindowsApps).
+        // Only a specifically selected library subdirectory may be recovered.
+        string drive = System.IO.Path.GetPathRoot(root)
+            ?? throw new UnauthorizedAccessException("Invalid library drive.");
+        if (string.Equals(System.IO.Path.TrimEndingDirectorySeparator(root),
+                System.IO.Path.TrimEndingDirectorySeparator(drive),
+                StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                "Recovery refuses volume roots; choose a dedicated library folder.");
         if (!Directory.Exists(root) || IsLink(root))
             throw new UnauthorizedAccessException("Unavailable or redirected staging library.");
         int recovered = 0;
