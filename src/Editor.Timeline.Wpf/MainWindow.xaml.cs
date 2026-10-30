@@ -148,7 +148,7 @@ public partial class MainWindow : Window
 
     private void CompleteTrackedImport(Guid task)
     {
-        try { CompleteTrackedImport(task); }
+        try { importCoordinator.CompleteImport(task); }
         finally { UpdateProcessingControls(); }
     }
 
