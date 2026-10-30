@@ -27,6 +27,16 @@ public sealed class MediaImportCoordinator
     public Guid ActiveLibrary { get { lock (gate) return library; } }
     public int ActiveImports { get { lock (gate) return active.Count; } }
 
+    // An import can commit changes to the current TimelineSession after await.
+    // Project replacement, saving and timeline mutations must not race with it.
+    public bool CanMutateProject { get { lock (gate) return active.Count == 0; } }
+
+    public void DemandProjectMutationAllowed()
+    {
+        if (!CanMutateProject)
+            throw new InvalidOperationException(BusyMessage);
+    }
+
     public Guid BeginImport()
     {
         lock (gate)
